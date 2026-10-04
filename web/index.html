@@ -145,6 +145,8 @@
   const LV = landLon.length;
   const landX = new Float64Array(LV), landY = new Float64Array(LV);
   let W = 0, H = 0, dpr = 1;
+  // 緯度経度をそのまま画面に写すための係数（経路の形を描くのに使う）
+  let gx0 = 0, gy0 = 0, gs = 1, gox = 0, goy = 0;
 
   function layout() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -162,6 +164,7 @@
     const aw = Math.max(200, W - padL - padR), ah = Math.max(200, H - padT - padB);
     const s = Math.min(aw / (x1 - x0), ah / (y1 - y0));
     const ox = padL + (aw - (x1 - x0) * s) / 2, oy = padT + (ah - (y1 - y0) * s) / 2;
+    gx0 = x0; gy0 = y0; gs = s; gox = ox; goy = oy;
     for (let i = 0; i < N; i++) {
       geoX[i] = ox + (NODES[i].x * kx - x0) * s;
       geoY[i] = oy + (-NODES[i].y - y0) * s;
@@ -255,18 +258,16 @@
       for (const s of data.spots) {
         if (s.state !== 'taxi' || s.off == null) continue;
         const dim = hover >= 0 && hover !== s.node;
-        // 電車で行けるところまで
+        // 電車で行けるところまで。経路の形が来ていればそれをなぞる
         if (s.off !== s.node) {
           ctx.strokeStyle = dim ? 'rgba(255,209,102,.18)' : 'rgba(255,209,102,.55)';
           ctx.lineWidth = 1.8; ctx.setLineDash([]);
-          ctx.beginPath(); ctx.moveTo(SX(s.node), SY(s.node));
-          ctx.lineTo(SX(s.off), SY(s.off)); ctx.stroke();
+          trace(s.trainPath, s.node, s.off);
         }
         // そこから自宅までタクシー
         ctx.strokeStyle = dim ? 'rgba(255,107,122,.18)' : 'rgba(255,107,122,.75)';
         ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
-        ctx.beginPath(); ctx.moveTo(SX(s.off), SY(s.off));
-        ctx.lineTo(SX(home), SY(home)); ctx.stroke();
+        trace(s.taxiPath, s.off, home);
         ctx.setLineDash([]);
         // 降りる駅
         ctx.fillStyle = dim ? 'rgba(255,209,102,.3)' : '#ffd166';
@@ -534,6 +535,21 @@
       ctx.fillStyle = color; ctx.fillText(val, vx, y);
     }
     ctx.globalAlpha = 1;
+  }
+
+  // 経路の形（[[lat, lon], ...]）をなぞる。無ければ 2 駅を直線で結ぶ
+  function trace(path, a, b) {
+    ctx.beginPath();
+    if (path && path.length > 1) {
+      for (let i = 0; i < path.length; i++) {
+        const x = (gox + (path[i][1] * kx - gx0) * gs) * view.k + view.tx;
+        const y = (goy + (-path[i][0] - gy0) * gs) * view.k + view.ty;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+    } else {
+      ctx.moveTo(SX(a), SY(a)); ctx.lineTo(SX(b), SY(b));
+    }
+    ctx.stroke();
   }
 
   function measure(text, size) {

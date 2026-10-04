@@ -13,10 +13,12 @@
 """
 import json
 import math
+import os
 import struct
 import sys
 import threading
 import urllib.parse
+import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -93,6 +95,66 @@ def road_m(a, b):
 _lock = threading.Lock()
 _limit_cache = {}
 _arr_cache = {}
+_road_cache = {}
+
+# ---- タクシー区間の道路の形 ----
+# osrm-routed が居れば実際の道の形を返す。居なければ None（画面は直線で描く）。
+OSRM = os.environ.get("OSRM_URL", "http://127.0.0.1:5050")
+
+
+def simplify(pts, tol_m):
+    """Douglas-Peucker。1000 点の経路をそのまま送ると重いので間引く。"""
+    if len(pts) < 3:
+        return pts
+    def dist(p, a, b):
+        ax, ay = (a[1] - p[1]) * 91000, (a[0] - p[0]) * 111000
+        bx, by = (b[1] - p[1]) * 91000, (b[0] - p[0]) * 111000
+        vx, vy = bx - ax, by - ay
+        l = vx * vx + vy * vy
+        t = 0 if not l else max(0.0, min(1.0, -(ax * vx + ay * vy) / l))
+        return math.hypot(ax + vx * t, ay + vy * t)
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        i, j = stack.pop()
+        if j - i < 2:
+            continue
+        k, dmax = i, -1.0
+        for x in range(i + 1, j):
+            d = dist(pts[x], pts[i], pts[j])
+            if d > dmax:
+                k, dmax = x, d
+        if dmax > tol_m:
+            keep[k] = True
+            stack.append((i, k))
+            stack.append((k, j))
+    return [p for p, f in zip(pts, keep) if f]
+
+
+def road_path(a, b):
+    """駅 a → 駅 b の道の形。[[lat, lon], ...]。取れなければ None。"""
+    with _lock:
+        if (a, b) in _road_cache:
+            return _road_cache[(a, b)]
+    ya, xa = NET.node_pos[a]
+    yb, xb = NET.node_pos[b]
+    url = ("%s/route/v1/driving/%f,%f;%f,%f?overview=full&geometries=geojson"
+           % (OSRM, xa, ya, xb, yb))
+    try:
+        with urllib.request.urlopen(url, timeout=3) as r:
+            j = json.loads(r.read())
+        pts = [[round(c[1], 5), round(c[0], 5)]
+               for c in j["routes"][0]["geometry"]["coordinates"]] if j["code"] == "Ok" else None
+        if pts:
+            pts = simplify(pts, 40)
+    except Exception:
+        pts = None
+    with _lock:
+        if len(_road_cache) > 4000:
+            _road_cache.clear()
+        _road_cache[(a, b)] = pts
+    return pts
 
 
 def limits(home):
@@ -109,10 +171,11 @@ def limits(home):
 
 
 def reach(spot, t):
+    """spot を t に出たときの各駅への最早到着と、経路の親。"""
     with _lock:
         v = _arr_cache.get((spot, t))
     if v is None:
-        v = NET.earliest_arrival(spot, t)
+        v = NET.earliest_arrival_paths(spot, t)
         with _lock:
             if len(_arr_cache) > 4000:
                 _arr_cache.clear()
@@ -140,7 +203,7 @@ def night(home, t):
 
         # 終電が尽きた。電車で行けるところまで行って、いちばん安い駅で降りる
         row["state"] = "taxi"
-        arr = reach(c, t)
+        arr, par = reach(c, t)
         cands = []
         for v in range(len(NET.node_name)):
             if arr[v] >= INF:
@@ -169,6 +232,13 @@ def night(home, t):
         row["offTime"] = best[3]
         row["km"] = round(best[2] / 1000.0, 1)
         row["trainMin"] = best[3] - t
+        # 線を実際の形で描くための座標列
+        if best[1] != c:
+            ids = NET.forward_path(par, c, best[1])
+            if ids:
+                row["trainPath"] = [[round(NET.node_pos[v][0], 5),
+                                     round(NET.node_pos[v][1], 5)] for v in ids]
+        row["taxiPath"] = road_path(best[1], home)
         # 全部タクシーで帰ったらいくらか（比較用）
         dc = road_m(c, home)
         row["allTaxi"] = taxi_fare(dc, is_night(t)) if dc is not None else None

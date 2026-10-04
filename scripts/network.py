@@ -195,6 +195,67 @@ class Network:
                 break
         return label
 
+    def earliest_arrival_paths(self, origin, t0, rounds=5, horizon=240):
+        """earliest_arrival と同じ枝刈りのまま、経路の復元に必要な親も返す。
+
+        journey() は 1 日ぶんの便をすべてなめるので 1 回 0.35 秒かかる。
+        こちらは earliest_arrival と同じ値を返しつつ、親を残すだけなので同じ速さ。
+        """
+        INF = 10**6
+        label = [INF] * len(self.node_name)
+        label[origin] = t0
+        parent = [None] * len(self.node_name)
+        limit = t0 + horizon
+        use = [(ti, seq) for ti, (seq, (dep0, arrN))
+               in enumerate(zip(self.trips, self.trip_span))
+               if arrN >= t0 and dep0 <= limit]
+        for _ in range(rounds):
+            improved = False
+            nxt, par = label[:], parent[:]
+            for ti, seq in use:
+                board = None
+                for k, (nid, arr, dep) in enumerate(seq):
+                    if board is not None and arr < nxt[nid]:
+                        nxt[nid], par[nid] = arr, ("t", ti, board, k)
+                        improved = True
+                    if board is None and label[nid] + (0 if nid == origin else TRANSFER_MIN) <= dep:
+                        board = k
+            for i in range(len(self.node_name)):
+                if nxt[i] >= INF:
+                    continue
+                for j, cost in self.foot[i]:
+                    v = nxt[i] + cost
+                    if v < nxt[j]:
+                        nxt[j], par[j] = v, ("w", i)
+                        improved = True
+            label, parent = nxt, par
+            if not improved:
+                break
+        return label, parent
+
+    def forward_path(self, parent, origin, target):
+        """earliest_arrival_paths の親から、origin → target の通る駅を並べて返す。"""
+        out, cur, guard = [], target, 0
+        while cur != origin and guard < 60:
+            guard += 1
+            p = parent[cur]
+            if p is None:
+                return None
+            if p[0] == "w":
+                out.append([cur, p[1]])
+                cur = p[1]
+            else:
+                _, ti, b, k = p
+                seq = self.trips[ti]
+                out.append([n for n, _, _ in reversed(seq[b:k + 1])])
+                cur = seq[b][0]
+        pts = []
+        for part in reversed(out):
+            for nid in reversed(part):
+                if not pts or pts[-1] != nid:
+                    pts.append(nid)
+        return pts
+
     # ---------- 逆向き探索（経路つき） ----------
     def latest_departure_paths(self, home, deadline=None, rounds=5):
         """latest_departure と同じ計算をしながら、経路の復元に必要な親を残す。
