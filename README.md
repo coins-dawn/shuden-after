@@ -12,6 +12,7 @@ python3 scripts/build_base.py       # 駅・路線 → web/data/base.json
 python3 scripts/build_land.py       # 海岸線・県境 → web/data/land.json（無くても動く）
 python3 scripts/pick_spots.py       # 候補の繁華街 → web/data/spots.json
 python3 scripts/build_roadmatrix.py # 駅間の道路距離 → data/road_m.bin（無くても動く）
+python3 scripts/build_taxipaths.py  # タクシー区間の道の形 → data/taxi_paths.bin（無くても動く）
 
 python3 server.py 8003              # http://127.0.0.1:8003/
 ```
@@ -32,6 +33,7 @@ scripts/
   build_land.py        国土数値情報 N03 から海岸線と県境 → web/data/land.json
   pick_spots.py        候補の繁華街 10 駅 → web/data/spots.json
   build_roadmatrix.py  OSRM の /table で駅間の道路距離行列 → data/road_m.bin
+  build_taxipaths.py   OSRM の /route でタクシー区間の道の形 → data/taxi_paths.bin
 server.py              web/ の配信と /api/night
 web/index.html         描画と操作。Canvas 2D だけで、地図タイルもライブラリも使わない
 ```
@@ -58,17 +60,28 @@ web/index.html         描画と操作。Canvas 2D だけで、地図タイル�
 - **電車の区間** … `earliest_arrival_paths` が探索の親を残すので、通る駅を並べられる。
   `journey()` でも同じことはできるが、あちらは 1 日ぶんの便をすべてなめるので 1 回 0.35 秒。
   こちらは `earliest_arrival` と同じ枝刈りのまま親を足すだけなので**同じ速さ**（1 回 0.010 秒）。
-- **タクシーの区間** … `osrm-routed` の `/route` から道の形を取り、
-  **Douglas-Peucker で 40m まで間引く**（1,000 点 → 30〜60 点）。
-  駅の組ごとにキャッシュする。
+- **タクシーの区間** … **先に全部計算して `data/taxi_paths.bin` に入れてある**ので、
+  アプリを動かすときに OSRM は要らない。
+
+形は **(降りる駅, 自宅) だけで決まり、時刻には依らない**（時刻が決めるのは
+「どの駅で降りるか」で、降りてしまえば道は同じ）。スライダーの範囲
+（20:00〜翌03:00・5 分刻み）で実際に出てくる組を数えると **23,314 通り**。
+**ひとつの時刻ぶんでは足りない** — いちばん広くカバーできる 23:45 の表でも
+全体の 52.9%、22:00 の表なら 49.5% しか埋まらないので、**全時刻ぶんを列挙して全部計算する**。
+
+作り方（**開発時に 1 回だけ**。20 分ほど）:
 
 ```bash
 docker run -d --rm -p 5050:5000 -v /var/tmp/odc2026-osrm:/data \
   osrm/osrm-backend osrm-routed --algorithm mld /data/tokyo.osrm
+python3 scripts/build_taxipaths.py
 ```
 
-**osrm-routed が居なくても動く。** 取れなかった区間は画面が直線で描く
-（`OSRM_URL` で場所を変えられる）。運賃・降りる駅の計算には関係しない
+点は Douglas-Peucker で 40m まで間引き（1 本 584 点 → 33 点）、
+1e-5 度を 1 とした int16 の差分で持つ。
+
+`data/taxi_paths.bin` が無いときは `osrm-routed` に聞きにいき（`OSRM_URL`）、
+**それも居なければ画面が直線で描く**。どちらも運賃・降りる駅の計算には関係しない
 （そちらは `data/road_m.bin` の行列だけを見る）。
 
 ### タクシー運賃
@@ -85,6 +98,11 @@ docker run -d --rm -p 5050:5000 -v /var/tmp/odc2026-osrm:/data \
 
 **時間距離併用運賃（時速 10km 以下の走行 85 秒ごとに 100 円）と高速代は見ていない**ので、
 出てくる金額は実際より安め。営業区域の外（横浜・大宮など）も同じ運賃で計算している。
+
+降りる駅の候補は、**道路距離を測ってある 829 駅に限る**。`data/road_m.bin` は東京駅から
+50km 以内ぶんしかなく、それ以外は直線×1.35 で代用していたが、運賃はこのアプリの主役の
+数字なので測っていない距離で出さない（直線近似は 2 割ほど高く出る）。
+この制限で答えが変わるのは 33,120 通り中 3 通り（相模線の香川・宮山・寒川を自宅にしたとき）。
 
 ### 札の置き方
 

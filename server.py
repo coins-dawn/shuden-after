@@ -81,12 +81,20 @@ except (FileNotFoundError, AssertionError) as e:
 
 
 def road_m(a, b):
-    """駅 a から駅 b までの道路距離（メートル）。行列が無ければ直線×1.35。"""
+    """駅 a から駅 b までの道路距離（メートル）。分からなければ None。
+
+    行列は東京駅から 50km 以内の 829 駅ぶんしかない。**それ以外の駅は候補にしない。**
+    もともとは直線×1.35 で代用していたが、運賃はこのアプリの主役の数字なので、
+    測っていない距離で出すのはよくない（直線近似は 2 割ほど高く出る）。
+    実際、南の自宅（寒川・香川）で **茅ケ崎に降りる**という答えが出ることがあり、
+    その運賃だけ推定値になっていた。行列そのものが無いとき（開発中）は従来どおり代用する。
+    """
     if ROAD is not None:
         ia, ib = ROAD_POS.get(a), ROAD_POS.get(b)
-        if ia is not None and ib is not None:
-            v = ROAD[ia * len(ROAD_IDX) + ib]
-            return None if v >= 3_000_000 else v
+        if ia is None or ib is None:
+            return None
+        v = ROAD[ia * len(ROAD_IDX) + ib]
+        return None if v >= 3_000_000 else v
     ya, xa = NET.node_pos[a]
     yb, xb = NET.node_pos[b]
     return math.hypot((ya - yb) * 111000, (xa - xb) * 91000) * 1.35
@@ -98,8 +106,24 @@ _arr_cache = {}
 _road_cache = {}
 
 # ---- タクシー区間の道路の形 ----
-# osrm-routed が居れば実際の道の形を返す。居なければ None（画面は直線で描く）。
+# 先に全部計算して data/taxi_paths.bin に入れてある（scripts/build_taxipaths.py）。
+# **ふだんはこれだけを読む。osrm-routed は要らない。**
+# 表に無い組だけ osrm-routed に聞き、それも居なければ None（画面は直線で描く）。
 OSRM = os.environ.get("OSRM_URL", "http://127.0.0.1:5050")
+SCALE = 100000          # 1e-5 度を 1 とする
+
+TAXI_BLOB, TAXI_IDX = None, {}
+try:
+    _b = (ROOT / "data" / "taxi_paths.bin").read_bytes()
+    assert _b[:4] == b"TXP1", "taxi_paths.bin の形式が違う"
+    _n = struct.unpack_from("<I", _b, 4)[0]
+    for _i in range(_n):
+        _off, _home, _at, _cnt, _ = struct.unpack_from("<HHIHH", _b, 8 + _i * 12)
+        TAXI_IDX[(_off, _home)] = (_at, _cnt)
+    TAXI_BLOB = _b
+    print("タクシー経路の形 %d 組（%.1f MB）" % (_n, len(_b) / 1e6), flush=True)
+except (FileNotFoundError, AssertionError) as e:
+    print("タクシー経路の形が無いので osrm-routed に聞きます（%s）" % e, flush=True)
 
 
 def simplify(pts, tol_m):
@@ -132,8 +156,28 @@ def simplify(pts, tol_m):
     return [p for p, f in zip(pts, keep) if f]
 
 
+def stored_path(a, b):
+    """先に計算してある道の形。[[lat, lon], ...]。無ければ None。"""
+    v = TAXI_IDX.get((a, b))
+    if v is None or TAXI_BLOB is None:
+        return None
+    at, cnt = v
+    cy = int(round(NET.node_pos[a][0] * SCALE))
+    cx = int(round(NET.node_pos[a][1] * SCALE))
+    out = []
+    for i in range(cnt):
+        dy, dx = struct.unpack_from("<hh", TAXI_BLOB, at + i * 4)
+        cy += dy
+        cx += dx
+        out.append([round(cy / SCALE, 5), round(cx / SCALE, 5)])
+    return out
+
+
 def road_path(a, b):
     """駅 a → 駅 b の道の形。[[lat, lon], ...]。取れなければ None。"""
+    v = stored_path(a, b)
+    if v is not None:
+        return v
     with _lock:
         if (a, b) in _road_cache:
             return _road_cache[(a, b)]
@@ -183,6 +227,32 @@ def reach(spot, t):
     return v
 
 
+def choose_off(arr, home):
+    """行ける駅のうち、自宅までのタクシーがいちばん安く済む駅を選ぶ。
+
+    (運賃, 降りる駅, 道路距離, その駅に着く時刻) を返す。選べなければ None。
+    scripts/build_taxipaths.py も同じ選び方をする必要があるので、ここに切り出してある。
+    """
+    cands = []
+    for v in range(len(NET.node_name)):
+        if arr[v] >= INF:
+            continue
+        d = road_m(v, home)
+        if d is None:
+            continue
+        f = taxi_fare(d, is_night(arr[v]))
+        if f is not None:
+            cands.append((f, arr[v], v, d))
+    if not cands:
+        return None
+    cheapest = min(c[0] for c in cands)
+    # いちばん安い駅だけを見ると、「25 分乗って 360 円だけ安い」ような
+    # 誰もやらない選択が出る。**ほぼ同額なら早く着くほうを採る。**
+    near = [c for c in cands if c[0] <= cheapest + TIE_YEN]
+    f, a, v, d = min(near, key=lambda c: (c[1], c[0]))
+    return f, v, d, a
+
+
 def night(home, t):
     lim = limits(home)
     out = []
@@ -204,24 +274,7 @@ def night(home, t):
         # 終電が尽きた。電車で行けるところまで行って、いちばん安い駅で降りる
         row["state"] = "taxi"
         arr, par = reach(c, t)
-        cands = []
-        for v in range(len(NET.node_name)):
-            if arr[v] >= INF:
-                continue
-            d = road_m(v, home)
-            if d is None:
-                continue
-            f = taxi_fare(d, is_night(arr[v]))
-            if f is not None:
-                cands.append((f, arr[v], v, d))
-        best = None
-        if cands:
-            cheapest = min(c0[0] for c0 in cands)
-            # いちばん安い駅だけを見ると、「25 分乗って 360 円だけ安い」ような
-            # 誰もやらない選択が出る。**ほぼ同額なら早く着くほうを採る。**
-            near = [c0 for c0 in cands if c0[0] <= cheapest + TIE_YEN]
-            f, a, v, d = min(near, key=lambda c0: (c0[1], c0[0]))
-            best = (f, v, d, a)
+        best = choose_off(arr, home)
         if best is None:
             row["state"] = "unknown"
             out.append(row)
