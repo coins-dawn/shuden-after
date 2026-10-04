@@ -287,17 +287,23 @@
     chip(lay.home.x, lay.home.y, '自宅・' + NODES[home].n, '', '#ffd166', 0, false, false);
 
     if (data) {
-      // 束ねた札への引き出し線
+      // 札と点をつなぐ線。近い札でも短い線を出す。
+      // これが無いと、どの札がどの点のものか分からない
       ctx.setLineDash([]);
       for (const s of data.spots) {
         const p = lay.at[s.node];
-        if (!p || !p.lead) continue;
+        if (!p) continue;
         const on = hover === s.node, dim = hover >= 0 && !on;
-        const ex = p.side > 0 ? p.x - 9 : p.x + p.w + 9;
+        const x = SX(s.node), y = SY(s.node);
+        const ex = p.ax - 4 * p.side, ey = p.ay;
+        const d = Math.hypot(ex - x, ey - y);
+        if (d < 11) continue;                 // 札が点に接していれば要らない
+        const t = 7.5 / d;                    // 点のふちから描きはじめる
+        const sx = x + (ex - x) * t, sy = y + (ey - y) * t;
         const path = () => {
           ctx.beginPath();
-          ctx.moveTo(SX(s.node), SY(s.node));
-          ctx.lineTo(ex, p.y);
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(ex, ey);
           ctx.stroke();
         };
         // 路線図の上を横切るので、まず暗い縁を敷いて線を浮かせる
@@ -309,8 +315,10 @@
         ctx.globalAlpha = dim ? .12 : on ? .9 : .5;
         ctx.lineWidth = on ? 1.6 : 1;
         path();
-        ctx.beginPath(); ctx.arc(ex, p.y, on ? 2.6 : 1.8, 0, Math.PI * 2);
-        ctx.fillStyle = on ? stateColor(s) : '#b9c2d1'; ctx.fill();
+        if (d > 40) {
+          ctx.beginPath(); ctx.arc(ex, ey, on ? 2.6 : 1.8, 0, Math.PI * 2);
+          ctx.fillStyle = on ? stateColor(s) : '#b9c2d1'; ctx.fill();
+        }
         ctx.globalAlpha = 1;
       }
 
@@ -342,19 +350,24 @@
 
   // ---- 札の配置 ----
   // 全体表示だと候補 10 駅のうち 8 駅が 170×80px に収まってしまい（新宿–渋谷 30px、
-  // 上野–錦糸町 31px）、点のそばに札を置く場所が無い。固まっている駅は横の空きに
-  // 縦 1 列で束ね、引き出し線で点に戻す。点の上下の順に積むので線は交差しない。
+  // 上野–錦糸町 31px）、点のそばには置けない。離れたところに置いて引き出し線で戻すが、
+  // 素直に置くと線どうしが交差して、どの札がどの駅か追えなくなる。
+  // そこで **交差の数を数えながら置き場所を選ぶ**。
   // 配置は 自宅・ビュー ごとに 1 回だけ決める。時刻で文字幅が変わっても札が動かない。
   const HITS = [];
-  const ROW_H = 24, ARM = 58, NEAR = 78;
-  const PADX = 22, PADY = 13;   // 札のまわりに空ける余白。隣の札と 1 行に見えないように
+  const PADX = 16, PADY = 13;   // 札のまわりに空ける余白。隣の札と 1 行に見えないように
+  const DIRS = 16;              // 点のまわりに試す向き
+  const RADII = [22, 46, 74, 108, 148, 196, 250];
+  // 点数づけの重み。交差をいちばん嫌う
+  const W_HIT = 100000, W_CROSS = 4000, W_NEARDOT = 700, W_OVERDOT = 1500, W_FAR = 1.0;
+  const W_LEFT = 60;            // 左に伸ばすと駅名が点から遠くなるので、右を優先する
   let layKey = '', layVal = null;
 
   function labelLayout() {
     // 札を置いてよい範囲と、避ける場所。避ける場所は実際のパネルの位置から取る
     // （狭い幅では一覧が消え、操作パネルが横いっぱいに広がるため）
     const L = 10, R = W - 10, T = 64, B = H - 56;
-    const boxes = [];
+    const walls = [];
     for (const sel of ['.head', '.panel', '.list', '.foot']) {
       const el = document.querySelector(sel);
       if (!el || getComputedStyle(el).display === 'none') continue;
@@ -362,107 +375,133 @@
       // 一覧は中身で高さが変わるので、下は画面下に固定して扱う。
       // 残りも 20px に丸める。中身が少し変わるたびに札が組み直されないように
       const bot = sel === '.list' ? H - 44 : r.bottom + 8;
-      boxes.push([Math.floor((r.left - 10) / 20) * 20, Math.floor((r.top - 8) / 20) * 20,
+      walls.push([Math.floor((r.left - 10) / 20) * 20, Math.floor((r.top - 8) / 20) * 20,
                   Math.ceil((r.right + 10) / 20) * 20, Math.ceil(bot / 20) * 20]);
     }
     // 時刻は鍵に入れない。文字幅が変わっても札が動かないようにするため
     const key = [home, view.k.toFixed(3), Math.round(view.tx), Math.round(view.ty),
-      W, H, boxes.join(';')].join('|');
+      W, H, walls.join(';')].join('|');
     if (key === layKey && layVal) return layVal;
 
     // 値は時刻で変わるので、取りうるいちばん広い文字で場所を取っておく
     // （「あと 155分」は「¥00,000」より広い）
     const VW = Math.max(measure('¥00,000', 13.5), measure('あと 999分', 13.5));
-    const sp = SPOTS.filter(s => s.node !== home).map(s => ({
-      node: s.node, name: s.name, x: SX(s.node), y: SY(s.node), nw: measure(s.name, 13),
-    }));
-    const at = {};
+    const sp = SPOTS.filter(s => s.node !== home).map(s => {
+      const nw = measure(s.name, 13);
+      return { node: s.node, name: s.name, x: SX(s.node), y: SY(s.node), nw, w: nw + 12 + VW };
+    });
     // 札が駅の点に乗らないようにする。こちらは余白なしで判定する
-    // （PADX は札どうしを離すための余白で、点との間隔ではない）
-    const dots = sp.map(s => [s.x - 9, s.y - 9, s.x + 9, s.y + 9]);
-    dots.push([SX(home) - 11, SY(home) - 11, SX(home) + 11, SY(home) + 11]);
+    const dots = sp.map(s => [s.x, s.y]).concat([[SX(home), SY(home)]]);
 
-    // 自宅の札を先に置く
+    // 自宅の札は先に置いて、以後は動かない壁として扱う
     const hw = measure('自宅・' + NODES[home].n, 13);
-    const hp = ring(SX(home), SY(home), hw, boxes, dots, L, R, T, B);
-    boxes.push([hp.x - PADX, hp.y - PADY, hp.x + hw + PADX, hp.y + PADY]);
+    const hp = ring(SX(home), SY(home), hw, walls, dots, L, R, T, B);
+    walls.push([hp.x - PADX, hp.y - PADY, hp.x + hw + PADX, hp.y + PADY]);
 
-    // 近いものどうしをまとめる
-    const par = sp.map((_, i) => i);
-    const find = i => par[i] === i ? i : (par[i] = find(par[i]));
-    for (let i = 0; i < sp.length; i++)
-      for (let j = i + 1; j < sp.length; j++)
-        if (Math.hypot(sp[i].x - sp[j].x, sp[i].y - sp[j].y) < NEAR) par[find(i)] = find(j);
-    const groups = new Map();
-    for (let i = 0; i < sp.length; i++) {
-      const r = find(i);
-      if (!groups.has(r)) groups.set(r, []);
-      groups.get(r).push(i);
-    }
-
-    // 固まっているぶんを縦 1 列に束ねる
-    for (const g of [...groups.values()].filter(g => g.length > 1)) {
-      const xs = g.map(i => sp[i].x), ys = g.map(i => sp[i].y);
-      const minX = Math.min(...xs), maxX = Math.max(...xs);
-      const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-      const nameW = Math.max(...g.map(i => sp[i].nw));
-      const w = nameW + 12 + VW;
-      const ord = g.slice().sort((a, b) => sp[a].y - sp[b].y);   // 上から順＝線が交差しない
-      const tot = ord.length * ROW_H;
-      const fits = (x, top) => {
-        if (x < L || x + w > R || top < T || top + tot > B) return false;
-        const b = [x - PADX - 4, top - 6, x + w + PADX + 4, top + tot + 6];
-        const r = [x - 5, top - 2, x + w + 5, top + tot + 2];
-        return !boxes.some(o => overlap(b, o)) && !dots.some(o => overlap(r, o));
-      };
-      // 横は空きの広い側から、縦は駅の高さに近いところから探す
-      const first = (R - (maxX + ARM + w)) >= ((minX - ARM - w) - L) ? 1 : -1;
-      let x = null, top = null, side = first;
-      search:
-      for (const sd of [first, -first])
-        for (const arm of [ARM, ARM + 44, ARM + 96]) {
-          const cx = sd > 0 ? maxX + arm : minX - arm - w;
-          for (let d = 0; d <= 460; d += 16)
-            for (const sg of (d ? [-1, 1] : [0])) {
-              const ct = cy - tot / 2 + sg * d;
-              if (fits(cx, ct)) { x = cx; top = ct; side = sd; break search; }
-            }
+    // 候補の置き場所を、点のまわりに放射状に用意する
+    const cand = sp.map(s => {
+      const out = [];
+      for (const r of RADII)
+        for (let a = 0; a < DIRS; a++) {
+          const th = a * 2 * Math.PI / DIRS;
+          const ax = s.x + Math.cos(th) * r, ay = s.y + Math.sin(th) * r;
+          const right = Math.cos(th) >= -1e-9;
+          const x = right ? ax : ax - s.w;
+          if (x < L || x + s.w > R || ay < T || ay > B) continue;
+          if (walls.some(o => overlap([x - PADX, ay - PADY, x + s.w + PADX, ay + PADY], o))) continue;
+          out.push({ x, y: ay, ax, ay, side: right ? 1 : -1, r,
+                     box: [x - PADX, ay - PADY, x + s.w + PADX, ay + PADY],
+                     rect: [x - 5, ay - 11, x + s.w + 5, ay + 11] });
         }
-      if (x === null) {     // どうしても空かないときは枠に収めるだけ
-        x = Math.max(L, Math.min(first > 0 ? maxX + ARM : minX - ARM - w, R - w));
-        top = Math.max(T, Math.min(cy - tot / 2, B - tot));
+      return out;
+    });
+
+    // その置き場所の悪さ。交差・重なり・点を隠すことを数える
+    const cost = (i, c, put) => {
+      let v = W_FAR * c.r;
+      if (c.side < 0) v += W_LEFT;
+      for (const o of dots) {                         // 札が駅の点に乗らない
+        if (o[0] >= c.rect[0] && o[0] <= c.rect[2] && o[1] >= c.rect[1] && o[1] <= c.rect[3])
+          v += W_OVERDOT;
+        if (nearSeg(o[0], o[1], sp[i].x, sp[i].y, c.ax, c.ay) < 8) v += W_NEARDOT;
       }
-      ord.forEach((i, k) => {
-        at[sp[i].node] = { x, y: top + k * ROW_H + ROW_H / 2, w, nameW, side, lead: true };
-      });
-      boxes.push([x - PADX - 4, top - 6, x + w + PADX + 4, top + tot + 6]);
-    }
+      for (let j = 0; j < sp.length; j++) {
+        const d = put[j];
+        if (j === i || !d) continue;
+        if (overlap(c.box, d.box)) v += W_HIT;
+        if (cross(sp[i].x, sp[i].y, c.ax, c.ay, sp[j].x, sp[j].y, d.ax, d.ay)) v += W_CROSS;
+      }
+      return v;
+    };
 
-    // 離れている駅は点のそばに
-    for (const g of [...groups.values()].filter(g => g.length === 1)) {
-      const s = sp[g[0]], w = s.nw + 12 + VW;
-      const p = ring(s.x, s.y, w, boxes, dots, L, R, T, B);
-      const far = Math.hypot(p.x - s.x, p.y - s.y) > 36;
-      at[s.node] = { x: p.x, y: p.y, w, nameW: s.nw, side: p.x >= s.x ? 1 : -1, lead: far };
-      boxes.push([p.x - PADX, p.y - PADY, p.x + w + PADX, p.y + PADY]);
-    }
+    // いちばん置きにくいものから置き、そのあと順に置き直して交差を減らす
+    const put = new Array(sp.length).fill(null);
+    const order = sp.map((_, i) => i).sort((a, b) => cand[a].length - cand[b].length);
+    for (let pass = 0; pass < 5; pass++)
+      for (const i of order) {
+        put[i] = null;
+        let best = null, bv = Infinity;
+        for (const c of cand[i]) {
+          const v = cost(i, c, put);
+          if (v < bv) { bv = v; best = c; }
+        }
+        put[i] = best || fallback(sp[i], walls, L, R, T, B);
+      }
 
+    const at = {};
+    sp.forEach((s, i) => {
+      const c = put[i];
+      at[s.node] = { x: c.x, y: c.y, ax: c.ax, ay: c.ay, w: s.w, nameW: s.nw, side: c.side };
+    });
     layKey = key; layVal = { home: hp, at };
     return layVal;
   }
 
+  // どこにも置けなかったとき。枠の中をあらく走査していちばん近い空きを使う
+  function fallback(s, walls, L, R, T, B) {
+    let best = null, bd = Infinity;
+    for (let by = T; by <= B; by += 16)
+      for (let bx = L; bx + s.w <= R; bx += 24) {
+        const d = (bx - s.x) ** 2 + (by - s.y) ** 2;
+        if (d >= bd) continue;
+        if (walls.some(o => overlap([bx - PADX, by - PADY, bx + s.w + PADX, by + PADY], o))) continue;
+        bd = d; best = { x: bx, y: by, ax: bx, ay: by, side: 1, r: Math.sqrt(d),
+                         box: [bx - PADX, by - PADY, bx + s.w + PADX, by + PADY],
+                         rect: [bx - 5, by - 11, bx + s.w + 5, by + 11] };
+      }
+    const x = Math.max(L, Math.min(s.x + 12, R - s.w)), y = Math.max(T, Math.min(s.y, B));
+    return best || { x, y, ax: x, ay: y, side: 1, r: 12,
+                     box: [x - PADX, y - PADY, x + s.w + PADX, y + PADY],
+                     rect: [x - 5, y - 11, x + s.w + 5, y + 11] };
+  }
+
   const overlap = (a, b) => !(a[2] < b[0] || b[2] < a[0] || a[3] < b[1] || b[3] < a[1]);
 
-  // 点のまわりを 12 方向 × 3 段で探し、どこにも重ならない場所を返す
-  function ring(x, y, w, boxes, dots, L, R, T, B) {
+  // 2 本の線分が交わるか
+  function cross(ax, ay, bx, by, cx, cy, dx, dy) {
+    const s = (px, py, qx, qy, rx, ry) =>
+      Math.sign((qx - px) * (ry - py) - (qy - py) * (rx - px));
+    return s(ax, ay, bx, by, cx, cy) !== s(ax, ay, bx, by, dx, dy)
+        && s(cx, cy, dx, dy, ax, ay) !== s(cx, cy, dx, dy, bx, by);
+  }
+
+  // 点と線分の距離
+  function nearSeg(px, py, ax, ay, bx, by) {
+    const vx = bx - ax, vy = by - ay, l = vx * vx + vy * vy;
+    const t = l ? Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / l)) : 0;
+    return Math.hypot(px - ax - vx * t, py - ay - vy * t);
+  }
+
+  // 自宅の札だけは、点のまわりを 12 方向 × 3 段で探して置く
+  function ring(x, y, w, walls, dots, L, R, T, B) {
     const free = (bx, by) => {
       if (bx < L || bx + w > R || by < T || by > B) return false;
       const b = [bx - PADX, by - PADY, bx + w + PADX, by + PADY];
       const r = [bx - 5, by - 11, bx + w + 5, by + 11];
-      return !boxes.some(o => overlap(b, o)) && !dots.some(o => overlap(r, o));
+      return !walls.some(o => overlap(b, o))
+        && !dots.some(o => o[0] >= r[0] && o[0] <= r[2] && o[1] >= r[1] && o[1] <= r[3]);
     };
-    for (const r of [0, 1, 2]) {
-      const d = 12 + r * 26;
+    for (const d of [12, 38, 64]) {
       for (let a = 0; a < 12; a++) {
         const th = (a % 2 ? -1 : 1) * Math.floor((a + 1) / 2) * (Math.PI / 6);
         const px = x + Math.cos(th) * d, py = y + Math.sin(th) * d;
@@ -470,15 +509,7 @@
         if (free(bx, py)) return { x: bx, y: py };
       }
     }
-    // そばに空きが無いとき（点が画面の外に出ているときなど）は、
-    // 枠の中をあらく走査していちばん近い空きを使う。引き出し線でつなぐ
-    let best = null, bd = Infinity;
-    for (let by = T; by <= B; by += 16)
-      for (let bx = L; bx + w <= R; bx += 24) {
-        const d = (bx - x) * (bx - x) + (by - y) * (by - y);
-        if (d < bd && free(bx, by)) { bd = d; best = { x: bx, y: by }; }
-      }
-    return best || { x: Math.max(L, Math.min(x + 12, R - w)), y: Math.max(T, Math.min(y, B)) };
+    return { x: Math.max(L, Math.min(x + 12, R - w)), y: Math.max(T, Math.min(y, B)) };
   }
 
   // 1 行の札。駅名と値を同じ行に並べる（2 行だと都心で場所が足りない）。
