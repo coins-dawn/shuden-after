@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""web/ を配信しつつ、「終電までの残り」と「終電後のタクシー代」をその場で計算する。
+"""site/ を配信する開発用サーバ。/api/night は答え合わせ用に残してある。
+
+画面そのものはサーバを使わない（site/data/home/<駅>.bin を読んで自分で計算する）。
+GitHub Pages に置くのは site/ の中身だけ。
 
   GET /                        web/index.html
   GET /api/night?home=12&t=1420
@@ -26,7 +29,8 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import network  # noqa: E402
 
-WEB = ROOT / "web"
+SRC = ROOT / "web" / "data"      # build_*.py が作る中間データ
+WEB = ROOT / "site"              # 配信する（＝ GitHub Pages に置く）ほう
 INF = 10 ** 6
 
 # ---- タクシー運賃（東京都特別区・武蔵野市・三鷹市／普通車）----
@@ -64,7 +68,7 @@ print("ネットワークを組み立てています …", flush=True)
 NET = network.Network()
 print("ノード %d / 便 %d" % (len(NET.node_name), len(NET.trips)), flush=True)
 
-SPOTS = json.loads((WEB / "data" / "spots.json").read_text())
+SPOTS = json.loads((SRC / "spots.json").read_text())
 
 # ---- 道路距離の行列 ----
 ROAD_IDX, ROAD, ROAD_POS = None, None, None

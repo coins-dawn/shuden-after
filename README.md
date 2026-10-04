@@ -4,17 +4,27 @@
 「終電まであと何分か」と、終電が尽きたあとの「電車で行けるところまで行って
 そこからタクシーに乗ったときの運賃」を地図に出す Web アプリ。
 
-## 動かし方
+このアプリは**サーバを使わない**。`site/` を静的に配るだけで動く。
+
+```bash
+python3 -m http.server 8003 --directory site     # http://127.0.0.1:8003/
+```
+
+`site/` は git に入っているので、作り直さなくても動く。
+
+### 作り直すとき
 
 ```bash
 python3 scripts/fetch_odpt.py       # 駅・路線・列車時刻表を取得（要トークン、下記）
 python3 scripts/build_base.py       # 駅・路線 → web/data/base.json
-python3 scripts/build_land.py       # 海岸線・県境 → web/data/land.json（無くても動く）
+python3 scripts/build_land.py       # 海岸線・県境 → web/data/land.json
 python3 scripts/pick_spots.py       # 候補の繁華街 → web/data/spots.json
-python3 scripts/build_roadmatrix.py # 駅間の道路距離 → data/road_m.bin（無くても動く）
-python3 scripts/build_taxipaths.py  # タクシー区間の道の形 → data/taxi_paths.bin（無くても動く）
+python3 scripts/build_roadmatrix.py # 駅間の道路距離 → data/road_m.bin（要 OSRM）
+python3 scripts/build_taxipaths.py  # タクシー区間の道の形 → data/taxi_paths.bin（要 OSRM）
+python3 scripts/build_static.py     # 答えを全部計算 → site/data/（15 分ほど）
 
-python3 server.py 8003              # http://127.0.0.1:8003/
+python3 scripts/verify_static.py 60 # site/ の答えとその場の計算が一致するか
+python3 server.py 8003              # 開発用。/api/night で任意の条件を試せる
 ```
 
 `fetch_odpt.py` はワークスペース直下の `.env` から `ODPT_ACCESS_TOKEN` と
@@ -34,13 +44,31 @@ scripts/
   pick_spots.py        候補の繁華街 10 駅 → web/data/spots.json
   build_roadmatrix.py  OSRM の /table で駅間の道路距離行列 → data/road_m.bin
   build_taxipaths.py   OSRM の /route でタクシー区間の道の形 → data/taxi_paths.bin
-server.py              web/ の配信と /api/night
-web/index.html         描画と操作。Canvas 2D だけで、地図タイルもライブラリも使わない
+  build_static.py      答えを全部計算して site/data/ に書く
+  verify_static.py     site/ の答えがその場の計算と一致するか確かめる
+server.py              開発用。site/ の配信と /api/night（答え合わせ用）
+site/index.html        描画と操作。Canvas 2D だけで、地図タイルもライブラリも使わない
+site/data/home/*.bin   自宅ごとの答え（1 ファイル 15KB ほど、829 駅ぶん）
+.github/workflows/     site/ を GitHub Pages に出す
 ```
+
+### 配るもの
+
+| | |
+|---|---|
+| 最初に落ちるもの | **194KB**（画面 38KB・地図 85KB・海岸線 54KB・自宅 1 件 13KB ほか） |
+| 自宅を変えたとき | **その自宅のファイル 1 つだけ**（15KB ほど） |
+| 時刻を変えたとき | **通信なし**（手元のデータだけで引ける） |
+| `site/` 全体 | 13MB / 833 ファイル |
 
 ### 計算
 
-`/api/night?home=<駅>&t=<分>` が、候補 10 駅それぞれの状態と、線を描くための形を返す。
+答えは **`scripts/build_static.py` が先に全部出して `site/data/home/<駅>.bin` に入れてある**。
+画面はそれを 1 回読むだけで、時刻を動かしてもその場で引ける。
+スライダーは 20:00〜翌03:00 の 5 分刻み（85 通り）なので、**取りうる条件はすべて計算済み**。
+
+計算そのものは `server.py` にあり、`/api/night?home=<駅>&t=<分>` で同じ答えが取れる。
+`scripts/verify_static.py` が両者を突き合わせる（自宅 60 × 候補 10 × 時刻 85 ＝ 51,000 件で一致を確認）。
 
 1. **終電のリミット** … `latest_departure(home)` を 1 回。
    逆向きの探索なので、**全駅について「何時までにそこを出れば家に着くか」が一度に出る**。
@@ -150,10 +178,27 @@ python3 scripts/build_taxipaths.py
 基本ライセンス第 8 条 4 項 (1) は、**元のデータの大部分を復元できる派生データ**を
 第三者が再利用可能な状態で公開・再配布することを禁じている（チャレンジ限定ライセンスにも同条項）。
 
-- 取得した時刻表は `data/raw/` に置き、`.gitignore` で除外している。
-- `web/data/` も **git 管理外**。公開するならライセンスごとの確認が要る。
-- 画面下に、提供データである旨・正確性を保証しない旨・交通事業者へ直接問い合わせない旨・
-  静的データの取得日を出している（開発者ガイドライン 3.1 / 2.2.1）。消さないこと。
+**配るのは「答え」だけで、時刻表は配らない。**
+
+| | 置き場所 | git |
+|---|---|---|
+| 列車時刻表（25,671 便） | `data/raw/` | **除外** |
+| 駅間の道路距離行列・タクシー経路の元データ | `data/` | **除外** |
+| 中間データ（base/land/spots の生成先） | `web/data/` | **除外** |
+| **自宅ごとの答え**（終電リミット・降りる駅・運賃・経路の形） | `site/data/home/` | 入れる |
+| 駅と路線の線・海岸線・候補駅 | `site/data/` | 入れる |
+
+自宅ごとのファイルに入っているのは、**自宅 1 駅 × 候補 10 駅 × 時刻 85 通り**に対する
+終電リミット・降りる駅・到着時刻・道路距離・運賃と、その経路の駅の並びだけ。
+**ここから 25,671 便の時刻表を復元することはできない。**
+
+地図の下地（`site/data/base.json`）には駅の名前・座標と路線のつながりが入る。
+**駅と路線の情報を公開することになるので、公開前に各事業者のライセンスを確認すること。**
+
+画面下に、提供データである旨・正確性を保証しない旨・交通事業者へ直接問い合わせない旨・
+静的データの取得日を出している（開発者ガイドライン 3.1 / 2.2.1）。消さないこと。
+**ガイドライン 2.2.2 はデータ更新の通知から 1 週間以内の更新を求めているが、
+先に計算した静的サイトは自動では追随しない。**作り直して push する運用が要る。
 
 ## 分かっている制約
 
