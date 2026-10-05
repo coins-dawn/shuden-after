@@ -63,9 +63,13 @@ def static_row(H, si, t):
 
 
 def main():
-    nh = int(sys.argv[1]) if len(sys.argv) > 1 else 60
+    import json as _json
+    from pathlib import Path as _P
+    allh = [h["node"] for h in _json.loads(
+        (_P(__file__).resolve().parents[1] / "web" / "data" / "homes.json").read_text())]
+    nh = min(int(sys.argv[1]) if len(sys.argv) > 1 else len(allh), len(allh))
     random.seed(29)
-    homes = random.sample(server.ROAD_IDX, nh)
+    homes = allh[:nh]
     times = list(range(1200, 1621, 5))
     # 逆向き探索は自宅ごとに 0.4 秒かかるので、自宅をまとめて回す
     bad = tot = 0

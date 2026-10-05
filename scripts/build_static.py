@@ -52,9 +52,11 @@ print("サーバと同じ組み立てをします…", flush=True)
 import server  # noqa: E402
 
 NET = server.NET
-IDX = server.ROAD_IDX              # 道路距離を測ってある 829 駅＝自宅に選べる駅
-if IDX is None:
+if server.ROAD_IDX is None:
     sys.exit("data/road_m.bin が要ります")
+# 自宅に選べる駅（scripts/pick_homes.py で決めてある。方角と距離が散るように手で選んだ 10 駅）
+HOMES = json.loads((ROOT / "web" / "data" / "homes.json").read_text())
+IDX = [h["node"] for h in HOMES]
 SPOTS = server.SPOTS
 INF = server.INF
 T_FROM, T_TO, T_STEP = 1200, 1620, 5
@@ -211,7 +213,7 @@ def main():
 
     # 5) 索引と、地図まわりのファイル
     idx = {
-        "homes": IDX,
+        "homes": HOMES,
         "spots": [s["node"] for s in SPOTS],
         "time": {"from": T_FROM, "to": T_TO, "step": T_STEP},
         "fare": {"base": server.FARE_BASE, "baseM": server.FARE_BASE_M,
@@ -219,7 +221,7 @@ def main():
                  "night": server.NIGHT_RATE},
     }
     (OUT / "index.json").write_text(json.dumps(idx, separators=(",", ":")), encoding="utf-8")
-    for f in ("base.json", "land.json", "spots.json"):
+    for f in ("base.json", "land.json", "spots.json", "homes.json"):
         src = ROOT / "web" / "data" / f
         if src.exists():
             shutil.copy(src, OUT / f)

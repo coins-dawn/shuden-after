@@ -19,6 +19,7 @@ python3 scripts/fetch_odpt.py       # 駅・路線・列車時刻表を取得（
 python3 scripts/build_base.py       # 駅・路線 → web/data/base.json
 python3 scripts/build_land.py       # 海岸線・県境 → web/data/land.json
 python3 scripts/pick_spots.py       # 候補の繁華街 → web/data/spots.json
+python3 scripts/pick_homes.py       # 自宅に選べる 10 駅 → web/data/homes.json
 python3 scripts/build_roadmatrix.py # 駅間の道路距離 → data/road_m.bin（要 OSRM）
 python3 scripts/build_taxipaths.py  # タクシー区間の道の形 → data/taxi_paths.bin（要 OSRM）
 python3 scripts/build_static.py     # 答えを全部計算 → site/data/（15 分ほど）
@@ -42,6 +43,7 @@ scripts/
   build_base.py        駅ノード・路線の線・ラインカラー → web/data/base.json
   build_land.py        国土数値情報 N03 から海岸線と県境 → web/data/land.json
   pick_spots.py        候補の繁華街 10 駅 → web/data/spots.json
+  pick_homes.py        自宅に選べる 10 駅 → web/data/homes.json
   build_roadmatrix.py  OSRM の /table で駅間の道路距離行列 → data/road_m.bin
   build_taxipaths.py   OSRM の /route でタクシー区間の道の形 → data/taxi_paths.bin
   build_static.py      答えを全部計算して site/data/ に書く
@@ -56,10 +58,10 @@ site/data/home/*.bin   自宅ごとの答え（1 ファイル 15KB ほど、829 
 
 | | |
 |---|---|
-| 最初に落ちるもの | **194KB**（画面 38KB・地図 85KB・海岸線 54KB・自宅 1 件 13KB ほか） |
-| 自宅を変えたとき | **その自宅のファイル 1 つだけ**（15KB ほど） |
+| 最初に落ちるもの | **205KB**（画面 49KB・地図 85KB・海岸線 54KB・自宅 1 件 15KB ほか） |
+| 自宅を変えたとき | **その自宅のファイル 1 つだけ**（15〜17KB） |
 | 時刻を変えたとき | **通信なし**（手元のデータだけで引ける） |
-| `site/` 全体 | 13MB / 833 ファイル |
+| `site/` 全体 | **396KB / 14 ファイル** |
 
 ### 計算
 
@@ -203,6 +205,24 @@ python3 scripts/build_taxipaths.py
 - ズームが動いている間は札を描かない。置き場所を毎フレーム探し直すことになるため
 - 収める範囲は**操作パネルと一覧の実際の位置**から決める。
   狭い画面では操作パネルが横いっぱいになるので、横ではなく下に避ける
+
+### 自宅の選び方
+
+**自宅はセレクトから 10 駅を選ぶ。** 駅は `scripts/pick_homes.py` に手で書いてあり、
+**東京駅からの方角 8 方位と距離 18〜42km に散るように**選んだ。
+
+| | | | |
+|---|---|---|---|
+| 浦和（北西 22km） | 川越（北西 36km） | 春日部（北 33km） | 柏（北東 27km） |
+| 船橋（東 20km） | 千葉（東 33km） | 川崎（南 18km） | 大船（南西 42km） |
+| 三鷹（西 19km） | 立川（西 32km） | | |
+
+- **飲む候補の 10 駅とは重ねない**（重ねるとその自宅のとき候補が 9 駅に減る）
+- 都心（10km 以内）は入れない。歩いて帰れる距離で「終電を逃す」話をしても仕方がない
+- ⚠ **町田は外した。** 小田急の列車時刻表が提供されていないため横浜線だけで計算され、
+  終電が 22:39 と実際よりかなり早く出てしまう
+- 結果が一様にならないことを確認した。00:15 に店を出たときの運賃の幅は
+  **三鷹の 20.4 倍（¥600〜¥12,240）から 大船の 51.6 倍（¥600〜¥30,960）**まで開く
 
 ### 候補の駅の選び方
 
