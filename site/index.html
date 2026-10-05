@@ -1317,9 +1317,12 @@
     if (playTimer) clearInterval(playTimer);
     playTimer = null;
     if (!on) return;
+    // 右端で止まっているときに押したら、はじめから
+    if (t0 >= tTo) { t0 = tFrom; timeEl.value = t0; timeVal.textContent = fmt(t0); setNight(t0); load(); }
     playTimer = setInterval(() => {
-      t0 += PLAY_STEP;
-      if (t0 > tTo) t0 = tFrom;
+      // **右端まで行ったら止める。** すぐ左へ戻すと、終わったあとの余韻が消える
+      if (t0 >= tTo) { setPlaying(false); return; }
+      t0 = Math.min(tTo, t0 + PLAY_STEP);
       timeEl.value = t0; timeVal.textContent = fmt(t0); setNight(t0);
       load();
     }, PLAY_MS);
