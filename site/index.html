@@ -119,6 +119,19 @@
 
   /* 出典は 1 行だけ画面に出したままにする（開発者ガイドライン 3.1 / 2.2.1）。
      くわしい注意書きは「このサービスについて」に入れた */
+  /* 選んだ行の中に開く、帰り方の明細 */
+  .trip { flex-basis: 100%; margin: 7px 0 3px; padding: 8px 0 2px 2px;
+    border-top: 1px dashed rgba(238,241,246,.16); font-size: 11px; line-height: 1.5; }
+  .trip .at { display: flex; gap: 8px; align-items: baseline; }
+  .trip .at b { color: var(--ink); font-weight: 600; font-size: 11.5px; }
+  .trip .tm { color: var(--home); font-variant-numeric: tabular-nums; min-width: 36px; }
+  .trip .seg { display: flex; gap: 8px; color: var(--sub); margin: 2px 0;
+    padding: 2px 0 2px 9px; border-left: 2px solid rgba(238,241,246,.22); margin-left: 16px; }
+  .trip .seg .ln { font-weight: 600; }
+  .trip .seg.car { border-left-style: dashed; border-left-color: rgba(255,107,122,.6); }
+  .trip .seg.walk { border-left-style: dotted; }
+  .trip .nb { color: var(--faint); }
+
   .foot { position: absolute; bottom: 0; left: 0; right: 0; padding: 8px 20px; z-index: 3;
     font-size: 11px; color: var(--sub); line-height: 1.5; }
   .foot a { color: #93a0b4; }
@@ -1018,6 +1031,7 @@
     const v = new DataView(buf);
     if (String.fromCharCode(v.getUint8(0), v.getUint8(1), v.getUint8(2), v.getUint8(3)) !== 'SHDN')
       throw new Error('形式が違う');
+    const ver = v.getUint16(4, true);
     let p = 6;
     const node = v.getUint16(p, true); p += 2;
     const ns = v.getUint8(p); p += 1;
@@ -1060,8 +1074,28 @@
       }
       txPaths.push(a);
     }
+    // 版 5: 道のり（何時に何線に乗って、どこで乗り換えるか）
+    const leg = new Uint16Array(n), legs = [];
+    if (ver >= 5) {
+      for (let i = 0; i < n; i++) { leg[i] = v.getUint16(p, true); p += 2; }
+      m = v.getUint16(p, true); p += 2;
+      for (let i = 0; i < m; i++) {
+        const c = v.getUint8(p); p += 1;
+        const a = new Array(c);
+        for (let j = 0; j < c; j++) {
+          a[j] = { walk: v.getUint8(p) === 1, line: v.getUint8(p + 1),
+                   bn: v.getUint16(p + 2, true), dep: v.getUint16(p + 4, true),
+                   an: v.getUint16(p + 6, true), art: v.getUint16(p + 8, true),
+                   n: v.getUint8(p + 10) };
+          p += 11;
+        }
+        legs.push(a);
+      }
+    } else {
+      leg.fill(0xFFFF);
+    }
     return { node, ns, nt, tFrom, tStep, limit, allKm, allNight, allDay, first, firstDep,
-             trPaths, txPaths, ...cols };
+             trPaths, txPaths, leg, legs, ...cols };
   }
 
   // 運賃は先に計算して持っている（JS 側で計算すると丸めが食い違うため）
@@ -1092,6 +1126,7 @@
       row.fare = H.fare[i] === 0xFFFF ? null : H.fare[i];
       const a = isNight(t) ? H.allNight[si] : H.allDay[si];
       row.allTaxi = a === 0xFFFF ? null : a;
+      row.legs = H.leg[i] === 0xFFFF ? null : H.legs[H.leg[i]];
       row.trainPath = H.tr[i] === 0xFFFF ? null
         : H.trPaths[H.tr[i]].map(id => [NODES[id].y, NODES[id].x]);
       if (H.tx[i] === 0xFFFF) row.taxiPath = null;
@@ -1213,6 +1248,7 @@
     return -1;
   }
 
+  let scrolled = -1;
   function renderList() {
     dirtyWalls();                 // 一覧の高さが変わる
     const box = document.getElementById('items');
@@ -1238,11 +1274,13 @@
         sub = s.off === s.node ? '電車はもう無い・' + s.km + 'km'
           : s.offName + ' まで電車 ' + s.trainMin + '分 → ' + s.km + 'km';
       } else { right = '—'; }
+      const trip = picked === s.node ? tripHTML(s) : '';
       d.innerHTML = '<div><div class="nm">' + s.name
         + (s.state === 'taxi' && s.allTaxi && s.allTaxi > s.fare
             ? '<small>全部タクシーなら ' + yen(s.allTaxi) + '</small>' : '')
         + '</div><div class="sub">' + sub + '</div></div>'
-        + '<div class="col"><div class="vl" style="color:' + col + '">' + right + '</div></div>';
+        + '<div class="col"><div class="vl" style="color:' + col + '">' + right + '</div></div>'
+        + trip;
       d.dataset.node = s.node;
       if (hover === s.node) d.classList.add('on');
       if (picked === s.node) d.classList.add('sel');
@@ -1250,9 +1288,50 @@
       d.onmouseleave = () => setHover(-1);
       d.onclick = () => setPicked(s.node);
       box.appendChild(d);
+      // 選んだ行が折りたたみを開いて下にはみ出すことがあるので、一度だけ見える位置へ
+      if (picked === s.node && scrolled !== s.node) {
+        scrolled = s.node;
+        requestAnimationFrame(() => d.scrollIntoView({ block: 'nearest' }));
+      }
     }
+    if (picked < 0) scrolled = -1;
     document.getElementById('list-title').textContent =
       '終電のあとの帰り方（' + fmt(t0) + ' に出発）';
+  }
+
+  // ---- 選んだ帰り方の明細 ----
+  // 路線の色は地図と合わせる（base.json の路線名で引く）
+  const LINECOL = new Map();
+  base.lines.forEach((nm, i) => LINECOL.set(nm, COLORS[i] || '#8e97a8'));
+  const lineName = i => (INDEX.lines && INDEX.lines[i]) || '鉄道';
+  const at = (t, name, bold) => '<div class="at"><span class="tm">'
+    + (t == null ? '' : fmt(t)) + '</span>' + (bold ? '<b>' + name + '</b>' : name) + '</div>';
+
+  function tripHTML(s) {
+    if (s.state !== 'taxi') return '';
+    // 駅の行は「着いた時刻」、区間の行は「乗る時刻・駅数・かかる分」。
+    // 乗る駅はひとつ上の行と同じなので、区間には出さない
+    const out = [at(t0, s.name + ' を出る', true)];
+    for (const g of (s.legs || [])) {
+      if (g.walk) {
+        out.push('<div class="seg walk">徒歩で乗り換え'
+          + (g.n ? ' <span class="nb">' + g.n + '分</span>' : '') + '</div>');
+        out.push(at(null, NODES[g.an].n, true));
+        continue;
+      }
+      const nm = lineName(g.line), c = LINECOL.get(nm) || '#b9c2d1', bits = [];
+      if (g.dep !== 0xFFFF) bits.push(fmt(g.dep) + ' 発');
+      bits.push((g.n - 1) + '駅');
+      if (g.art !== 0xFFFF && g.dep !== 0xFFFF && g.art > g.dep) bits.push((g.art - g.dep) + '分');
+      out.push('<div class="seg"><span class="ln" style="color:' + c + '">' + nm + '</span>'
+        + '<span class="nb">' + bits.join('・') + '</span></div>');
+      out.push(at(g.art === 0xFFFF ? null : g.art, NODES[g.an].n + ' 着', true));
+    }
+    out.push('<div class="seg car">タクシー <span class="nb">'
+      + (s.km != null ? s.km + 'km' : '') + (s.fare != null ? '・' + yen(s.fare) : '')
+      + '</span></div>');
+    out.push(at(null, NODES[home].n + '（自宅）', true));
+    return '<div class="trip">' + out.join('') + '</div>';
   }
 
   // ---- 操作 ----

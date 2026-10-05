@@ -43,10 +43,18 @@ def read_home(h):
     for _ in range(m):
         (c,) = struct.unpack_from("<H", b, p); p += 2
         txp.append(list(struct.unpack_from("<%dh" % (c * 2), b, p))); p += c * 4
+    # 版 5: 道のり（何時に何線に乗って、どこで乗り換えるか）
+    cols["leg"] = list(struct.unpack_from("<%dH" % (ns * nt), b, p)); p += ns * nt * 2
+    legs = []
+    (m,) = struct.unpack_from("<H", b, p); p += 2
+    for _ in range(m):
+        (c,) = struct.unpack_from("<B", b, p); p += 1
+        legs.append([struct.unpack_from("<BBHHHHB", b, p + k * 11) for k in range(c)])
+        p += c * 11
     assert p == len(b), "読み残し %d" % (len(b) - p)
     return dict(node=node, ns=ns, nt=nt, t_from=t_from, t_step=t_step,
                 limit=limit, allkm=allkm, allnight=allnight, allday=allday,
-                first=first, firstdep=firstdep, trp=trp, txp=txp, **cols)
+                first=first, firstdep=firstdep, trp=trp, txp=txp, legs=legs, **cols)
 
 
 def static_row(H, si, t):

@@ -37,6 +37,14 @@ GitHub Pages は静的ファイルしか置けないので、画面が要るも�
     uint16 電車の経路の数、続けて uint8 駅数 + uint16 駅 × 駅数
     uint16 タクシーの経路の数、続けて uint16 点数 + int16 緯度差,経度差 × 点数
            （最初の点は「降りる駅の座標」との差。1e-5 度を 1 とする）
+    ここから版 5:
+    uint16 候補 × 時刻 ぶんの「道のりの番号」（0xFFFF = 無し）
+    uint16 道のりの数、続けて uint8 区間数 + 区間 × 区間数。1 区間は 10 バイト:
+      uint8  種類（0=列車 / 1=徒歩乗換）
+      uint8  路線（index.json の lines の番号。徒歩は 255）
+      uint16 乗る駅 / uint16 発車時刻（0xFFFF = 無し）
+      uint16 降りる駅 / uint16 到着時刻（0xFFFF = 無し）
+      uint8  列車なら駅数、徒歩なら分
 """
 import json
 import shutil
@@ -111,8 +119,12 @@ def main():
     data = {h: {"off": [NONE16] * (ns * nt), "at": [0] * (ns * nt),
                 "km": [NONE16] * (ns * nt), "fare": [NONE16] * (ns * nt),
                 "tr": [NONE16] * (ns * nt), "tx": [NONE16] * (ns * nt),
-                "trpaths": [], "trmap": {}, "txpaths": [], "txmap": {}}
+                "leg": [NONE16] * (ns * nt),
+                "trpaths": [], "trmap": {}, "txpaths": [], "txmap": {},
+                "legs": [], "legmap": {}}
             for h in IDX}
+    LINES = []            # 路線名の一覧（.bin は番号で持つ）
+    LINEIDX = {}
 
     print("候補 × 時刻 × 自宅 を回します…", flush=True)
     t0 = time.time()
@@ -151,6 +163,34 @@ def main():
                             d["trmap"][key] = pid
                             d["trpaths"].append(seq)
                         d["tr"][i] = pid
+                # 道のり（何時に何線に乗って、どこで乗り換えるか）。
+                # 経路の形と同じ親をたどるだけなので、探索はやり直さない
+                if off != c:
+                    lg = server.NET.forward_legs(par, c, off)
+                    if lg:
+                        enc = []
+                        for kind, lname, bn, dep, an, art, cnt in lg:
+                            if kind == "t":
+                                li = LINEIDX.get(lname)
+                                if li is None:
+                                    li = len(LINES)
+                                    LINEIDX[lname] = li
+                                    LINES.append(lname)
+                                if li > 254:
+                                    li = 255
+                            else:
+                                li = 255
+                            enc.append((0 if kind == "t" else 1, li, bn,
+                                        NONE16 if dep is None else min(dep, NONE16 - 1), an,
+                                        NONE16 if art is None else min(art, NONE16 - 1),
+                                        min(255, cnt)))
+                        key = tuple(enc)
+                        lid = d["legmap"].get(key)
+                        if lid is None:
+                            lid = len(d["legs"])
+                            d["legmap"][key] = lid
+                            d["legs"].append(enc)
+                        d["leg"][i] = lid
                 # タクシーの経路
                 key = (off, h)
                 pid = d["txmap"].get(key)
@@ -171,7 +211,7 @@ def main():
     for h in IDX:
         d = data[h]
         buf = bytearray()
-        buf += b"SHDN" + struct.pack("<H", 4)
+        buf += b"SHDN" + struct.pack("<H", 5)
         buf += struct.pack("<HBHHB", h, ns, nt, T_FROM, T_STEP)
         for s in SPOTS:
             lv = LIM[h][s["node"]]
@@ -207,14 +247,22 @@ def main():
             buf += struct.pack("<H", len(out))
             for dy, dx in out:
                 buf += struct.pack("<hh", dy, dx)
+        buf += struct.pack("<%dH" % (ns * nt), *d["leg"])
+        buf += struct.pack("<H", len(d["legs"]))
+        for enc in d["legs"]:
+            buf += struct.pack("<B", min(255, len(enc)))
+            for kind, li, bn, dep, an, art, cnt in enc[:255]:
+                buf += struct.pack("<BBHHHHB", kind, li, bn, dep, an, art, cnt)
         (OUT / "home" / ("%d.bin" % h)).write_bytes(bytes(buf))
         total += len(buf)
     print("  %d ファイル  合計 %.1f MB  1 自宅あたり %.1f KB"
           % (len(IDX), total / 1e6, total / len(IDX) / 1024))
 
     # 5) 索引と、地図まわりのファイル
+    print("  道のり %d 本／路線名 %d 件" % (sum(len(data[h]["legs"]) for h in IDX), len(LINES)))
     idx = {
         "homes": HOMES,
+        "lines": LINES,
         "spots": [s["node"] for s in SPOTS],
         "time": {"from": T_FROM, "to": T_TO, "step": T_STEP},
         "fare": {"base": server.FARE_BASE, "baseM": server.FARE_BASE_M,

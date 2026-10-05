@@ -277,6 +277,32 @@ class Network:
                     pts.append(nid)
         return pts
 
+    def forward_legs(self, parent, origin, target):
+        """earliest_arrival_paths の親から、origin → target を**区間ごと**に並べて返す。
+
+        1 区間は ("t", 路線名, 乗る駅, 発車時刻, 降りる駅, 到着時刻, 駅数)
+        または    ("w", "", 乗換元, None, 乗換先, None, 徒歩の分)。
+        forward_path と同じ親をたどるだけなので、探索はやり直さない。
+        """
+        out, cur, guard = [], target, 0
+        while cur != origin and guard < 60:
+            guard += 1
+            p = parent[cur]
+            if p is None:
+                return None
+            if p[0] == "w":
+                cost = next((c for j, c in self.foot[p[1]] if j == cur), 0)
+                out.append(("w", "", p[1], None, cur, None, int(round(cost))))
+                cur = p[1]
+            else:
+                _, ti, b, k = p
+                seq = self.trips[ti]
+                out.append(("t", self.trip_line[ti], seq[b][0], seq[b][2],
+                            seq[k][0], seq[k][1], k - b + 1))
+                cur = seq[b][0]
+        out.reverse()
+        return out
+
     # ---------- 逆向き探索（経路つき） ----------
     def latest_departure_paths(self, home, deadline=None, rounds=5):
         """latest_departure と同じ計算をしながら、経路の復元に必要な親を残す。
