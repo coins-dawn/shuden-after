@@ -28,6 +28,7 @@ def read_home(h):
     allkm = list(struct.unpack_from("<%dH" % ns, b, p)); p += ns * 2
     allnight = list(struct.unpack_from("<%dH" % ns, b, p)); p += ns * 2
     allday = list(struct.unpack_from("<%dH" % ns, b, p)); p += ns * 2
+    first = list(struct.unpack_from("<%dH" % ns, b, p)); p += ns * 2
     cols = {}
     for k in ("off", "at", "km", "fare", "tr", "tx"):
         cols[k] = list(struct.unpack_from("<%dH" % (ns * nt), b, p)); p += ns * nt * 2
@@ -44,7 +45,7 @@ def read_home(h):
     assert p == len(b), "読み残し %d" % (len(b) - p)
     return dict(node=node, ns=ns, nt=nt, t_from=t_from, t_step=t_step,
                 limit=limit, allkm=allkm, allnight=allnight, allday=allday,
-                trp=trp, txp=txp, **cols)
+                first=first, trp=trp, txp=txp, **cols)
 
 
 def static_row(H, si, t):

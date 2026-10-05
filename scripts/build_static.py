@@ -23,6 +23,7 @@ GitHub Pages は静的ファイルしか置けないので、画面が要るも�
     int16  候補ごとの終電リミット（分。-1 = 帰れない）
     uint16 候補ごとの「全部タクシー」の道路距離（10m 単位。0xFFFF = 不明）
     uint16 候補ごとの「全部タクシー」の運賃（深夜）／uint16 同（昼）。0xFFFF = 不明
+    uint16 候補ごとの「始発を待ったときの自宅への到着時刻」（翌朝の分。0xFFFF = 帰れない）
     以下 候補 × 時刻 ぶんの配列が 6 本:
       uint16 降りる駅のノード id（0xFFFF = 該当なし）
       uint16 降りる駅に着く時刻（分）
@@ -82,7 +83,17 @@ def main():
             print("  %d/%d  %.0f 秒" % (k + 1, len(IDX), time.time() - t0), flush=True)
     print("  終電リミット %.0f 秒" % (time.time() - t0), flush=True)
 
-    # 2) 自宅ごとに貯める箱
+    # 2) 始発を待ったときの到着時刻（時刻には依らないので、候補ごとに 1 回でよい）
+    #    手元のダイヤは 04:18 が最初の発車。終電後に駅で粘るなら、ここから帰ることになる。
+    print("始発を待ったときの到着時刻を計算します…", flush=True)
+    FIRST = {}
+    for s in SPOTS:
+        a = NET.earliest_arrival(s["node"], 4 * 60, horizon=300)
+        FIRST[s["node"]] = {h: (None if a[h] >= INF else a[h]) for h in IDX}
+        ok = sum(1 for v in FIRST[s["node"]].values() if v is not None)
+        print("  %s → 帰れる自宅 %d/%d" % (s["name"], ok, len(IDX)), flush=True)
+
+    # 3) 自宅ごとに貯める箱
     ns, nt = len(SPOTS), len(TIMES)
     data = {h: {"off": [NONE16] * (ns * nt), "at": [0] * (ns * nt),
                 "km": [NONE16] * (ns * nt), "fare": [NONE16] * (ns * nt),
@@ -141,13 +152,13 @@ def main():
                 d["tx"][i] = pid
         print("  %s 済み  %.0f 秒" % (s["name"], time.time() - t0), flush=True)
 
-    # 3) 書き出し
+    # 4) 書き出し
     print("自宅ごとのファイルを書きます…", flush=True)
     total = 0
     for h in IDX:
         d = data[h]
         buf = bytearray()
-        buf += b"SHDN" + struct.pack("<H", 2)
+        buf += b"SHDN" + struct.pack("<H", 3)
         buf += struct.pack("<HBHHB", h, ns, nt, T_FROM, T_STEP)
         for s in SPOTS:
             lv = LIM[h][s["node"]]
@@ -159,6 +170,9 @@ def main():
             for m in allm:
                 f = server.taxi_fare(m, night) if m is not None else None
                 buf += struct.pack("<H", NONE16 if f is None or f >= NONE16 else f)
+        for s in SPOTS:
+            v = FIRST[s["node"]][h]
+            buf += struct.pack("<H", NONE16 if v is None else v)
         for key in ("off", "at", "km", "fare", "tr", "tx"):
             buf += struct.pack("<%dH" % (ns * nt), *d[key])
         buf += struct.pack("<H", len(d["trpaths"]))
@@ -182,7 +196,7 @@ def main():
     print("  %d ファイル  合計 %.1f MB  1 自宅あたり %.1f KB"
           % (len(IDX), total / 1e6, total / len(IDX) / 1024))
 
-    # 4) 索引と、地図まわりのファイル
+    # 5) 索引と、地図まわりのファイル
     idx = {
         "homes": IDX,
         "spots": [s["node"] for s in SPOTS],
