@@ -72,13 +72,18 @@
   .item .nm small { color: var(--faint); font-size: 10px; margin-left: 5px; }
   .item .vl { font-size: 13.5px; font-weight: 600; white-space: nowrap; }
   .item .sub { font-size: 9.5px; color: var(--sub); margin-top: 1px; line-height: 1.35; }
-  .item .alt { flex-basis: 100%; font-size: 10px; color: var(--faint); margin-top: 2px;
-    line-height: 1.3; white-space: nowrap; }
-  .item .alt b { color: var(--ok); font-weight: 600; }
   .item .col { display: flex; flex-direction: column; align-items: flex-end; flex: 0 0 auto; }
   /* 名前と内訳の側を縮むようにしておかないと、長い駅名のときに金額が次の行へ落ちる */
   .item > div:first-child { flex: 1 1 0; min-width: 0; }
   /* 長い駅名（高輪ゲートウェイ など）のときだけ 2 行になる。切り詰めると km が消えるため */
+
+  /* 1 つ選んでいるときだけ出す。全体に戻る道が「ズーム→全体」しか無く、
+     それが戻る手段に見えなかったので、画面の真ん中下に出す */
+  .back { position: absolute; left: 50%; bottom: 72px; transform: translateX(-50%); z-index: 4;
+    display: none; font: inherit; font-size: 12px; padding: 7px 15px; cursor: pointer;
+    color: var(--ink); background: var(--panel); border-radius: 999px;
+    border: 1px solid rgba(238,241,246,.3); white-space: nowrap; }
+  .back:hover { color: var(--home); border-color: var(--home); }
 
   .foot { position: absolute; bottom: 0; left: 0; right: 0; padding: 9px 20px; z-index: 3;
     font-size: 10.5px; color: var(--faint); line-height: 1.6; }
@@ -126,7 +131,7 @@
   </div>
   <div class="row">
     <div class="lab"><span>いま店を出る時刻</span><b id="time-val">22:00</b></div>
-    <input id="time" type="range" min="1200" max="1620" step="5" value="1320">
+    <input id="time" type="range" min="1200" max="1620" step="1" value="1360">
     <div class="ends"><span>20:00</span><span>翌 03:00</span></div>
     <button class="toggle wide" id="play" aria-pressed="false">時刻を進める</button>
   </div>
@@ -146,6 +151,7 @@
   <div id="items"></div>
 </div>
 
+<button class="back" id="back">← すべての帰り方に戻る</button>
 <div class="toast" id="toast"></div>
 <div class="foot" id="foot"></div>
 <div class="tip" id="tip"></div>
@@ -206,6 +212,8 @@
       if (pr.right + 20 + 220 < W - padR) padL = Math.max(padL, pr.right + 20);
       else padT = Math.max(padT, pr.bottom + 16);
     }
+    // 「全体に戻る」は出典の文の上に置く（出典は消せないので、重ねない）
+    document.getElementById('back').style.bottom = (padB + 8) + 'px';
     const aw = Math.max(200, W - padL - padR), ah = Math.max(200, H - padT - padB);
     const s = Math.min(aw / (x1 - x0), ah / (y1 - y0));
     const ox = padL + (aw - (x1 - x0) * s) / 2, oy = padT + (ah - (y1 - y0) * s) / 2;
@@ -245,7 +253,10 @@
 
   // ---- 状態 ----
   let home = INDEX.homes[0].node;
-  let t0 = 1320;
+  // 再生を押してから最初の終電が行くまでが長すぎたので、はじまりを 22:40 にした
+  // （候補 10 駅のうちいちばん早い終電は、自宅によって 23:05〜23:35）
+  const T_START = 1360;
+  let t0 = T_START;
   let data = null;
   let hover = -1;
   let picked = -1;       // 一覧や札をタップして選んだ駅。hover より優先する
@@ -258,13 +269,13 @@
 
   const fmt = v => String(Math.floor(v / 60) % 24).padStart(2, '0') + ':' + String(v % 60).padStart(2, '0');
   const yen = v => '¥' + v.toLocaleString();
-  const span = m => (m >= 60 ? Math.floor(m / 60) + '時間' + (m % 60 ? (m % 60) + '分' : '')
-                             : m + '分');
 
   // ---- 夜の深まり ----
   // 時刻が進むほど画面を暗くする。20:00 は夕方の青、翌03:00 はほとんど黒。
   // 真夜中あたりでいちばん速く落ちるように、両端をなめらかにした。
-  // 暗くするのは**背景の層だけ**（海岸線・路線・駅の点）。
+  // 暗くするのは**背景の層だけ**（海岸線と、画面のふちの暈し）。
+  // **鉄道（路線・駅の点）は夜が深まっても暗くしない。** 走っているあいだは走っている色で出す。
+  // そのかわり、どこで飲んでいても電車では帰れなくなった瞬間に、薄いグレーへ落とす（deadness）。
   // 札と帰り道は読めないと意味がないので、明るさを変えない。
   const DUSK = [15, 22, 40], DEEP = [2, 4, 9];
   let nn = 0;                              // 0=夕方 … 1=真夜中過ぎ
@@ -273,6 +284,21 @@
     return u * u * (3 - 2 * u);
   }
   const mixCh = (a, b, u) => Math.round(a + (b - a) * u);
+
+  // ---- 路線が死ぬ瞬間 ----
+  // この自宅について、候補 10 駅の終電リミットのいちばん遅いもの。
+  // これを過ぎたら、どこで飲んでいても電車では帰れない ＝ 路線網はもう使えない。
+  // 3 分で切り替わるので、再生中（1 分ずつ進む）はほぼ一瞬、スライダーを飛ばせば即座に変わる。
+  let deadAt = null;
+  const DEAD_MIN = 3, RAIL_GRAY = [150, 155, 165];
+  function setDeadAt() {
+    let v = null;
+    if (data) for (const s of data.spots)
+      if (s.limit != null && (v === null || s.limit > v)) v = s.limit;
+    deadAt = v;
+  }
+  const deadness = () =>
+    deadAt === null ? 0 : Math.max(0, Math.min(1, (t0 - deadAt) / DEAD_MIN));
   const bgRGB = () => DUSK.map((v, i) => mixCh(v, DEEP[i], nn));
   const bgCss = () => 'rgb(' + bgRGB().join(',') + ')';
   const fade = (near, far) => near + (far - near) * nn;
@@ -312,10 +338,14 @@
       let g = byColor.get(c); if (!g) { g = []; byColor.set(c, g); }
       g.push(a, b);
     }
+    // 終電が全部行くまでは路線の色のまま（夜が深まっても暗くしない）。
+    // 行ってしまったら薄いグレーに落として、「もう動いていない」ことを出す
+    const dd = deadness();
+    const railA = (0.46 * (1 - dd) + 0.10 * dd).toFixed(3);
     for (const [c, arr] of byColor) {
       const h = (COLORS[c] || '#8d93a0').replace('#', '');
-      ctx.strokeStyle = 'rgba(' + parseInt(h.slice(0,2),16) + ',' + parseInt(h.slice(2,4),16)
-        + ',' + parseInt(h.slice(4,6),16) + ',' + fade(0.46, 0.12).toFixed(3) + ')';
+      const rgb = [0, 2, 4].map((o, j) => mixCh(parseInt(h.slice(o, o + 2), 16), RAIL_GRAY[j], dd));
+      ctx.strokeStyle = 'rgba(' + rgb.join(',') + ',' + railA + ')';
       ctx.beginPath();
       for (let k = 0; k < arr.length; k += 2) {
         ctx.moveTo(SX(arr[k]), SY(arr[k])); ctx.lineTo(SX(arr[k+1]), SY(arr[k+1]));
@@ -324,7 +354,8 @@
     }
 
     // 駅（点）
-    ctx.fillStyle = 'rgba(238,241,246,' + fade(0.40, 0.12).toFixed(3) + ')';
+    const dotRGB = [238, 241, 246].map((v, j) => mixCh(v, RAIL_GRAY[j], dd));
+    ctx.fillStyle = 'rgba(' + dotRGB.join(',') + ',' + (0.40 * (1 - dd) + 0.10 * dd).toFixed(3) + ')';
     for (const i of VIS) {
       ctx.beginPath(); ctx.arc(SX(i), SY(i), NODES[i].w > 2 ? 1.6 : 1.0, 0, Math.PI * 2); ctx.fill();
     }
@@ -482,7 +513,8 @@
     // （狭い幅では一覧が消え、操作パネルが横いっぱいに広がるため）
     const L = 10, R = W - 10, T = 64, B = H - 56;
     const walls = [];
-    for (const sel of ['.head', '.panel', '.list', '.foot']) {
+    // '.back' は 1 つ選んでいるときだけ出る。出ている間は札の置き場所から避ける
+    for (const sel of ['.head', '.panel', '.list', '.foot', '.back']) {
       const el = document.querySelector(sel);
       if (!el || getComputedStyle(el).display === 'none') continue;
       const r = el.getBoundingClientRect();
@@ -729,19 +761,25 @@
     anim = requestAnimationFrame(step);
   }
 
-  // 一覧の行・地図の札のどちらをタップしても同じ
-  function setPicked(n) {
-    if (picked === n) {                       // もう一度押したら戻す
-      picked = -1;
-      tween(1, 0, 0);
-      renderList();
-      return;
-    }
-    picked = n;
-    const s = data && data.spots.find(x => x.node === n);
+  // 選ぶのをやめて全体に戻す。もう一度押す以外にも、
+  // 「← すべての帰り方に戻る」・何も無いところをタップ・Esc から呼ぶ
+  function clearPicked() {
+    if (picked < 0) return;
+    picked = -1;
+    backBtn.style.display = 'none';
     renderList();
-    if (s && s.state !== 'home') flyTo(routeBox(s));
-    else draw();
+    tween(1, 0, 0);
+  }
+
+  // 一覧の行・地図の札・地図の点、どれをタップしても同じ
+  function setPicked(n) {
+    if (picked === n) { clearPicked(); return; }   // もう一度押したら戻す
+    const s = data && data.spots.find(x => x.node === n);
+    if (!s || s.state === 'home') return;          // 自宅は選んでも見るものが無い
+    picked = n;
+    backBtn.style.display = 'block';
+    renderList();
+    flyTo(routeBox(s));
   }
 
   function measure(text, size) {
@@ -773,9 +811,10 @@
     const allNight = new Uint16Array(ns), allDay = new Uint16Array(ns);
     for (let i = 0; i < ns; i++) { allNight[i] = v.getUint16(p, true); p += 2; }
     for (let i = 0; i < ns; i++) { allDay[i] = v.getUint16(p, true); p += 2; }
-    const first = new Uint16Array(ns);     // 始発を待ったときの到着時刻（翌朝の分）
+    // 始発を待ったときの時刻。**いまは画面に出していない**が、形式は変えていないので読み飛ばす
+    const first = new Uint16Array(ns);     // 自宅への到着時刻（翌朝の分）
     for (let i = 0; i < ns; i++) { first[i] = v.getUint16(p, true); p += 2; }
-    const firstDep = new Uint16Array(ns);  // その始発の発車時刻（＝待ち時間の終わり）
+    const firstDep = new Uint16Array(ns);  // その始発の発車時刻
     for (let i = 0; i < ns; i++) { firstDep[i] = v.getUint16(p, true); p += 2; }
     const n = ns * nt, cols = {};
     for (const k of ['off', 'at', 'km', 'fare', 'tr', 'tx']) {
@@ -809,7 +848,10 @@
   const isNight = m => { const x = ((m % 1440) + 1440) % 1440; return x >= 22 * 60 || x < 5 * 60; };
 
   function compute(H, t) {
-    const ti = Math.round((t - H.tFrom) / H.tStep);
+    // 答えは 5 分刻みでしか持っていない。スライダーは 1 分刻みなので**切り上げて**引く。
+    // 切り捨てると、まだ終電に間に合う時刻の欄（＝空）を引いてしまう。
+    // 「あと N 分」と「終電が行ったかどうか」は、丸めない t でそのまま出す。
+    const ti = Math.max(0, Math.min(H.nt - 1, Math.ceil((t - H.tFrom) / H.tStep)));
     const out = [];
     for (let si = 0; si < H.ns; si++) {
       const s = SPOTS[si], row = { node: s.node, name: s.name };
@@ -830,13 +872,6 @@
       row.fare = H.fare[i] === 0xFFFF ? null : H.fare[i];
       const a = isNight(t) ? H.allNight[si] : H.allDay[si];
       row.allTaxi = a === 0xFFFF ? null : a;
-      // 始発を待つという手もある。到着は翌朝なので 1440 分ぶん先。
-      // 待ち時間の終わりは「着く時刻」ではなく「乗れる時刻」なので、発車で測る
-      if (H.first[si] !== 0xFFFF && H.firstDep[si] !== 0xFFFF) {
-        row.firstAt = H.first[si];
-        row.firstDep = H.firstDep[si];
-        row.firstWait = 1440 + H.firstDep[si] - t;
-      }
       row.trainPath = H.tr[i] === 0xFFFF ? null
         : H.trPaths[H.tr[i]].map(id => [NODES[id].y, NODES[id].x]);
       if (H.tx[i] === 0xFFFF) row.taxiPath = null;
@@ -871,6 +906,7 @@
     const next = compute(H, t0);
     catchLastTrains(next);
     data = next;
+    setDeadAt();
     render();
   }
 
@@ -881,7 +917,7 @@
   const flashes = new Map();            // 駅 -> 光りはじめた時刻
   let flashRaf = null, prevStates = null, prevT = null;
   const toastEl = document.getElementById('toast');
-  let toastTimer = null;
+  let toastTimer = null, toastNames = [], toastFrom = 0;
 
   function catchLastTrains(next) {
     const now = new Map(next.spots.map(s => [s.node, s.state]));
@@ -895,8 +931,11 @@
     const at = performance.now();
     for (const s of gone) flashes.set(s.node, at);
     pumpFlash();
-    toastEl.innerHTML = '<b>' + gone.map(s => s.name).join('・')
-      + '</b> の終電が、いま行きました。';
+    // 1 分ずつ進めると、続けて落ちた駅が別々のトーストになって読めない
+    // （吉祥寺 23:20 → 横浜 23:22 は 0.3 秒差）。少し前のものには書き足す
+    if (at - toastFrom > 1000) { toastNames = []; toastFrom = at; }
+    for (const s of gone) if (!toastNames.includes(s.name)) toastNames.push(s.name);
+    toastEl.innerHTML = '<b>' + toastNames.join('・') + '</b> の終電が、いま行きました。';
     toastEl.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
@@ -934,6 +973,7 @@
     const n = labelAt(mx, my);
     if (n >= 0) return n;
     if (data) for (const s of data.spots) {
+      if (s.node === home) continue;          // 自宅は押しても見るものが無い
       const dx = SX(s.node) - mx, dy = SY(s.node) - my;
       if (dx * dx + dy * dy < 169) return s.node;
     }
@@ -964,17 +1004,11 @@
         sub = s.off === s.node ? '電車はもう無い・' + s.km + 'km'
           : s.offName + ' まで電車 ' + s.trainMin + '分 → ' + s.km + 'km';
       } else { right = '—'; }
-      // 終電後は「始発まで待つ」も選べる。お金を払うか、時間を払うか
-      const alt = s.state === 'taxi' && s.firstWait != null
-        ? '<div class="alt">始発を待つなら <b>' + fmt(s.firstDep) + ' 発</b>（あと '
-          + span(s.firstWait) + '）→ ' + fmt(s.firstAt) + ' 着</div>'
-        : '';
       d.innerHTML = '<div><div class="nm">' + s.name
         + (s.state === 'taxi' && s.allTaxi && s.allTaxi > s.fare
             ? '<small>全部タクシーなら ' + yen(s.allTaxi) + '</small>' : '')
         + '</div><div class="sub">' + sub + '</div></div>'
-        + '<div class="col"><div class="vl" style="color:' + col + '">' + right + '</div></div>'
-        + alt;
+        + '<div class="col"><div class="vl" style="color:' + col + '">' + right + '</div></div>';
       d.dataset.node = s.node;
       if (hover === s.node) d.classList.add('on');
       if (picked === s.node) d.classList.add('sel');
@@ -995,6 +1029,8 @@
     homeName.textContent = h ? h.dir + ' ' + Math.round(h.km) + 'km' : NODES[i].n;
     homeSel.value = i;
     picked = -1;
+    backBtn.style.display = 'none';
+    deadAt = null;
     prevStates = null;        // 自宅が変われば帰り方は別物。前との比較はしない
     flashes.clear();
     load();
@@ -1012,6 +1048,8 @@
 
   const timeEl = document.getElementById('time'), timeVal = document.getElementById('time-val');
   const playBtn = document.getElementById('play');
+  const backBtn = document.getElementById('back');
+  backBtn.onclick = clearPicked;
   const zoomVal = document.getElementById('zoom-val');
   let timer = null;
   timeEl.addEventListener('input', () => {
@@ -1020,6 +1058,8 @@
     clearTimeout(timer); timer = setTimeout(load, 120);
   });
 
+  // 1 分ずつ進める。5 分ずつだと「あと N 分」が飛んで見え、暗くなり方も段になる
+  const PLAY_STEP = 1, PLAY_MS = 110;
   let playing = false, playTimer = null;
   function setPlaying(on) {
     playing = on;
@@ -1029,11 +1069,11 @@
     playTimer = null;
     if (!on) return;
     playTimer = setInterval(() => {
-      t0 += 5;
-      if (t0 > +timeEl.max) t0 = +timeEl.min;
+      t0 += PLAY_STEP;
+      if (t0 > +timeEl.max) t0 = T_START;        // 20:00 まで戻すと終電まで長すぎる
       timeEl.value = t0; timeVal.textContent = fmt(t0); setNight(t0);
       load();
-    }, 700);
+    }, PLAY_MS);
   }
   playBtn.onclick = () => setPlaying(!playing);
 
@@ -1041,7 +1081,7 @@
   document.getElementById('zoom-out').onclick = () => zoomAt(W / 2, H / 2, 1 / 1.5);
   document.getElementById('zoom-reset').onclick = () => {
     if (anim) { cancelAnimationFrame(anim); anim = null; }
-    picked = -1; renderList();
+    picked = -1; backBtn.style.display = 'none'; renderList();
     view.k = 1; view.tx = 0; view.ty = 0; zoomVal.textContent = '1.0×'; draw();
   };
   cv.addEventListener('wheel', e => {
@@ -1074,14 +1114,17 @@
       }
       return;
     }
-    setHover(spotAt(e.clientX, e.clientY));
+    const hit = spotAt(e.clientX, e.clientY);
+    setHover(hit);
     // 札の上では、その裏にたまたまある駅の吹き出しを出さない
     if (labelAt(e.clientX, e.clientY) >= 0) {
       tip.style.display = 'none'; cv.style.cursor = 'pointer'; return;
     }
     const i = nearest(e.clientX, e.clientY);
     if (i < 0) { tip.style.display = 'none'; cv.style.cursor = 'grab'; return; }
-    cv.style.cursor = 'pointer';
+    // 押せるのは候補 10 駅だけ。ほかの駅で指の形を出すと「自宅に選べる」ように見えて
+    // 紛らわしいので、名前を出すだけにする
+    cv.style.cursor = hit >= 0 ? 'pointer' : 'grab';
     tip.style.display = 'block';
     tip.style.left = (e.clientX + 12) + 'px';
     tip.style.top = (e.clientY + 12) + 'px';
@@ -1091,12 +1134,15 @@
     if (!drag) return;
     const was = drag.moved; drag = null; cv.style.cursor = 'grab';
     if (was) return;
-    const n = labelAt(e.clientX, e.clientY);
-    if (n >= 0) setPicked(n);                  // 札をタップ＝その帰り方を見る
+    // 札でも、候補の駅の点そのものでも、その帰り方を見る
+    const n = spotAt(e.clientX, e.clientY);
+    if (n >= 0) setPicked(n);
+    else clearPicked();                        // 何も無いところをタップ＝全体に戻る
     // 自宅はセレクトから選ぶ。地図のクリックでは変えない
   });
   cv.addEventListener('mouseleave', () => { tip.style.display = 'none'; setHover(-1); });
   window.addEventListener('resize', () => { layout(); clampView(); draw(); });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') clearPicked(); });
 
   document.getElementById('foot').innerHTML =
     '出典: <a href="https://www.odpt.org/" target="_blank" rel="noopener">公共交通オープンデータセンター</a>'
