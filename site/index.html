@@ -390,13 +390,15 @@
   const deadness = () =>
     deadAt === null ? 0 : clamp01((t0 - deadAt) / DEAD_MIN);
   // ---- 空（本物の星）----
-  // **その日の、スライダーの時刻の、東京の空**をそのまま出す（Yale Bright Star Catalogue）。
+  // **その日の、この夜ごろの、東京の空**をそのまま出す（Yale Bright Star Catalogue）。
+  // **時刻を進めても空は回さない**（2026-10-05 ユーザー指示「背景の星座は動かなくてよい」）。
+  // 開いたときの空のまま固定する。星は出たり消えたりするが、並びは動かない。
   // 天頂が画面の中心、外へ行くほど低い空の、等距離方位図法。**見上げている向き**なので東は左。
   // 星は画面に固定する（地図ではなく空なので、ズームしても流れない）。
   // 明るい星から順に出てくる — 本当の薄暮と同じ順。
   const SITE = { lat: 35.681, lon: 139.767 };     // 東京駅
   const D2R = Math.PI / 180;
-  let skyKey = '', skyPts = [], skySeg = [];
+  let skyKey = '', skyT = null, skyPts = [], skySeg = [];
 
   // 地方恒星時（度）。t はその日の 0:00 からの分（24 時超えは翌日）で、日本時間として扱う
   function lstDeg(t) {
@@ -419,11 +421,11 @@
   }
 
   function buildSky() {
-    const key = t0 + '|' + W + '|' + H;
+    if (skyT === null || !SKY) return;      // 空の時刻が決まるのは、最初の答えが届いたとき
+    const key = skyT + '|' + W + '|' + H;   // 画面の大きさが変わったときだけ組み直す
     if (key === skyKey) return;
     skyKey = key; skyPts = []; skySeg = [];
-    if (!SKY) return;
-    const lst = lstDeg(t0), R = Math.hypot(W, H) * 0.52, cx = W / 2, cy = H / 2;
+    const lst = lstDeg(skyT), R = Math.hypot(W, H) * 0.52, cx = W / 2, cy = H / 2;
     const mlim = SKY.mag / 10, mtop = -1.5;
     for (const st of SKY.s) {
       const p = project(st[0] / 10, st[1] / 10, lst, R, cx, cy);
@@ -1119,6 +1121,7 @@
       if (hi === null || v > hi) hi = v;
     }
     tFrom = lo === null ? H.tFrom : Math.max(H.tFrom, lo - HEAD);
+    if (skyT === null) skyT = tFrom;        // 空はここで決めて、あとは動かさない
     tTo   = hi === null ? last    : Math.min(last, hi + TAIL);
     timeEl.min = tFrom; timeEl.max = tTo;
     tEnds[0].textContent = fmt2(tFrom);
