@@ -23,6 +23,7 @@ python3 scripts/pick_homes.py       # 自宅に選べる 10 駅 → web/data/hom
 python3 scripts/build_roadmatrix.py # 駅間の道路距離 → data/road_m.bin（要 OSRM）
 python3 scripts/build_taxipaths.py  # タクシー区間の道の形 → data/taxi_paths.bin（要 OSRM）
 python3 scripts/build_static.py     # 答えを全部計算 → site/data/（15 分ほど）
+python3 scripts/build_stars.py      # 夜空（実際の星と星座線）→ site/data/stars.json
 
 python3 scripts/verify_static.py 60 # site/ の答えとその場の計算が一致するか
 python3 server.py 8003              # 開発用。/api/night で任意の条件を試せる
@@ -47,6 +48,7 @@ scripts/
   build_roadmatrix.py  OSRM の /table で駅間の道路距離行列 → data/road_m.bin
   build_taxipaths.py   OSRM の /route でタクシー区間の道の形 → data/taxi_paths.bin
   build_static.py      答えを全部計算して site/data/ に書く
+  build_stars.py       Yale Bright Star Catalogue と星座線 → site/data/stars.json
   verify_static.py     site/ の答えがその場の計算と一致するか確かめる
 server.py              開発用。site/ の配信と /api/night（答え合わせ用）
 site/index.html        描画と操作。Canvas 2D だけで、地図タイルもライブラリも使わない
@@ -72,7 +74,7 @@ site/data/home/*.bin   自宅ごとの答え（1 ファイル 15KB ほど、829 
 **スライダーだけは 1 分刻み**（5 分刻みだと持ち手が飛んで動く）。
 **範囲も自宅ごとに変える** — 20:00〜翌03:00 を通しで見せると、最初の終電までも、
 終電が全部行ったあとも、見ていて何も起きない時間が長い。
-**最初の終電の 20 分前から、最後の終電の 20 分後まで**（浦和なら 23:00〜翌00:35）。
+**最初の終電の 15 分前から、最後の終電の 20 分後まで**（浦和なら 23:05〜翌00:35）。
 1 分刻みの時刻で 5 分刻みの表を引くときは**切り上げる** — 切り捨てると、
 まだ終電に間に合う時刻の欄（＝空）を引いてしまう（**10 自宅 × 全分 × 10 候補で 67 か所**）。
 「あと N 分」と「終電が行ったかどうか」は丸めない時刻でそのまま出すので、
@@ -101,6 +103,9 @@ site/data/home/*.bin   自宅ごとの答え（1 ファイル 15KB ほど、829 
   こちらは `earliest_arrival` と同じ枝刈りのまま親を足すだけなので**同じ速さ**（1 回 0.010 秒）。
 - **タクシーの区間** … **先に全部計算して `data/taxi_paths.bin` に入れてある**ので、
   アプリを動かすときに OSRM は要らない。
+
+**電車の区間は太く引く**（暗い縁 6.4px ＋ 金色 3.6px）。
+路線図の上に重なるので、細いと背景に沈んでしまう。ここが帰り方の主役。
 
 形は **(降りる駅, 自宅) だけで決まり、時刻には依らない**（時刻が決めるのは
 「どの駅で降りるか」で、降りてしまえば道は同じ）。スライダーの範囲
@@ -190,11 +195,29 @@ python3 scripts/build_taxipaths.py
 切り替わりは 3 分ぶん（再生中はほぼ一瞬、スライダーを飛ばせば即座に変わる）。
 この時刻は自宅で変わる（浦和 00:15・三鷹 00:55）。
 
-### 星
+### 星（本物の空）
 
-**夜が深まるほど、星が少しずつ浮かんでくる。** 星は**画面に固定**する
-（地図ではなく空なので、ズームしても流れない）。1 つずつ出てくる時刻をばらしてあり、
-`nightness` がその星の番号を越えたところで浮かび上がる。大きさと明るさもばらばら。
+**夜が深まるほど、星が少しずつ浮かんでくる。**
+適当な点をばらまくのではなく、**その日の、スライダーの時刻の、東京の空**をそのまま出す。
+
+- 星は **Yale Bright Star Catalogue（V ≤ 4.6 の 1,010 個）**。`scripts/build_stars.py` が
+  VizieR から取って `site/data/stars.json`（22KB）に落としてある
+- 画面を**等距離方位図法**で見上げた空とみなす（**天頂が画面の中心**、外へ行くほど低い空、
+  北が上なので**東は左**）。地平線の下の星は出さない（10/5 23:00 なら 1,010 個中 487 個）
+- 時刻は**その日の日付＋スライダーの時刻を日本時間として**扱い、
+  地方恒星時から時角 → 高度・方位に直す。**スライダーを進めると空もゆっくり回る**
+- **明るい星から順に出てくる**（等級で出る順を決める）。本当の薄暮と同じ順になる
+- 星座線は d3-celestial のものを、**夜が深くなってからうっすら**（α 0.10）だけ
+
+答え合わせ: 北極星が 高度 36.3°・方位 0.5°（緯度 35.68° の真北）。
+10/5 23:00 の東京で、夏の大三角が西（方位 263〜301°）、アルデバランが東から昇り（方位 90°）、
+シリウスとアンタレスは地平線の下 — どれも実際どおり。
+
+### 流れ星
+
+**10 秒に 1 本ほど。** 細く（1.7px）短く（55〜130px）、0.75〜1.2 秒ですっと消える。
+頭だけ小さく光らせ、尾はグラデーションで消す。
+**わざとらしくしない**のが要点なので、出す間隔も向きも長さも毎回ばらす。
 
 ⚠ **つながっていない駅（90 駅）は地図に出さない。** 八高線・久留里線・成田線など、
 `odpt:Railway` の駅順が取れずに点が 1 つだけ浮いている駅がある。
@@ -243,13 +266,16 @@ python3 scripts/build_taxipaths.py
 
 ### 再生
 
-**1 分ずつ、0.22 秒おきに進める。** スライダーの左端（最初の終電の 20 分前）から始まるので、
-**4〜5 秒で 1 本目が落ち、端まで 21 秒**。端まで行ったら左端に戻す。
+**1 分ずつ、0.44 秒おきに進める。** 空が暗くなっていくのを見せるので、速いと流れてしまう。
+スライダーの左端（最初の終電の **15 分前**）から始まるので、
+**7 秒ほどで 1 本目が落ち、端まで 40 秒**。端まで行ったら左端に戻す。
 
 ### 画面の文言と、注意書きの置き場所
 
 - **ロゴ（「終電のあと」＋三日月）を押すと、はじめから。** 三日月は**左が空いた向き**
   （`mask` で左にずらした円を抜く）
+- **「このサービスについて」は右上**（一覧の上）に置く
+- 自宅の欄に方角と距離（「北西 22km」）は出さない。駅名だけでよい
 - 一覧の見出しは**「終電のあとの帰り方」**。
   飲み会に限った話に見せない（終電を逃す理由は人それぞれ）
 - **長い注意書きは「このサービスについて」に入れた。** 以前は画面の下に 3 行出していたが、
@@ -288,6 +314,8 @@ python3 scripts/build_taxipaths.py
 | データ | 提供元 | ライセンス |
 |---|---|---|
 | 駅・路線・列車時刻表 | [公共交通オープンデータセンター](https://www.odpt.org/) | 事業者ごとに異なる（下記） |
+| 星 | [Yale Bright Star Catalogue, 5th Revised Ed.](https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50)（Hoffleit & Warren 1991 / VizieR V/50） | 出典表示 |
+| 星座線 | [d3-celestial](https://github.com/ofrohn/d3-celestial) | BSD 3-Clause（下記） |
 | 海岸線・県境 | [国土数値情報 行政区域 N03](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-v3_1.html) | 国土数値情報 利用約款 |
 | 道路網 | [OpenStreetMap](https://www.openstreetmap.org/) | ODbL |
 
@@ -295,6 +323,15 @@ python3 scripts/build_taxipaths.py
 - **東京メトロ・つくばエクスプレス・東京臨海高速鉄道・多摩都市モノレール・横浜市交通局**:
   公共交通オープンデータ基本ライセンス
 - **JR東日本・京王電鉄・東武鉄道・相模鉄道**: チャレンジ限定ライセンス
+
+### d3-celestial（星座線）の表示
+
+> Copyright (c) 2015, Olaf Frohn. All rights reserved.
+> Redistribution and use in source and binary forms, with or without modification,
+> are permitted provided that the conditions of the BSD 3-Clause License are met.
+
+BSD 3-Clause は**著作権表示を残すこと**を条件にしている。
+`scripts/build_stars.py` と画面の「このサービスについて」にも出してある。**消さないこと。**
 
 ### 再配布についての注意
 

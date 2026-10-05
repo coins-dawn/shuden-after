@@ -27,7 +27,7 @@
   .head { position: absolute; top: 18px; left: 20px; z-index: 3; pointer-events: none; }
   .head button { pointer-events: auto; }
   /* ロゴ（文字＋三日月）はまとめて 1 つのボタン。押すと最初から */
-  .logo { display: flex; align-items: center; gap: 9px; margin: 0; padding: 0;
+  .logo { display: flex; align-items: center; gap: 5px; margin: 0; padding: 0;
     font: inherit; font-size: 20px; letter-spacing: .16em; font-weight: 600;
     color: var(--ink); background: none; border: 0; cursor: pointer; }
   .logo .moon { width: 19px; height: 19px; fill: var(--moon); flex: none;
@@ -35,9 +35,11 @@
   .logo:hover { color: var(--moon); }
   .logo:hover .moon { filter: drop-shadow(0 0 5px rgba(255,217,160,.55)); }
   .head p { margin: 7px 0 0; font-size: 12px; color: var(--sub); letter-spacing: .06em; }
-  .about { font: inherit; font-size: 11px; letter-spacing: .04em; margin-left: 10px;
-    padding: 3px 9px; cursor: pointer; color: var(--sub); white-space: nowrap;
-    background: rgba(238,241,246,.06); border: 1px solid var(--line); border-radius: 999px; }
+  /* 一覧（終電のあとの帰り方）の上。右上に置く */
+  .about { position: absolute; top: 52px; right: 20px; z-index: 3;
+    font: inherit; font-size: 11px; letter-spacing: .04em;
+    padding: 4px 11px; cursor: pointer; color: var(--sub); white-space: nowrap;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 999px; }
   .about:hover { color: var(--ink); border-color: rgba(238,241,246,.34); }
 
   /* このサービスについて（出典・ライセンス・注意書きはここに全部入れる） */
@@ -145,7 +147,7 @@
     .hint { display: none; }
     .foot { padding: 6px 12px; font-size: 9.5px; line-height: 1.45; }
     .foot .wide { display: none; }
-    .panel { top: 98px; }
+    .about { top: 13px; right: 12px; }
     .sheet-in { padding: 18px 16px 20px; font-size: 12px; }
   }
 </style>
@@ -164,12 +166,13 @@
       <circle cx="12" cy="12" r="9.6" mask="url(#mcut)"/>
     </svg>
   </button>
-  <p>終電を逃したら、どこにいたかで帰り方が変わる。<button class="about" id="about-btn">このサービスについて</button></p>
+  <p>終電を逃したら、どこにいたかで帰り方が変わる。</p>
 </div>
+<button class="about" id="about-btn">このサービスについて</button>
 
 <div class="panel">
   <div class="row">
-    <div class="lab"><span>自宅の最寄り駅</span><b id="home-name">—</b></div>
+    <div class="lab"><span>自宅の最寄り駅</span></div>
     <select id="home-sel"></select>
   </div>
   <div class="row">
@@ -204,6 +207,11 @@
       <li>海岸線・県境 …
         <a href="https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-v3_1.html" target="_blank" rel="noopener">国土数値情報（行政区域 2025年）</a>を加工</li>
       <li>道路 … <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener">OpenStreetMap</a>（ODbL）</li>
+      <li>星 … <a href="https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50" target="_blank" rel="noopener">Yale Bright Star Catalogue, 5th Revised Ed.</a>
+        （Hoffleit &amp; Warren 1991 / VizieR V/50）。<b>その日の東京の空</b>を、
+        時刻に合わせて出しています（4.6 等までの 1,010 個）</li>
+      <li>星座線 … <a href="https://github.com/ofrohn/d3-celestial" target="_blank" rel="noopener">d3-celestial</a>
+        Copyright (c) 2015, Olaf Frohn（BSD 3-Clause）</li>
     </ul>
 
     <h3>数字の読み方</h3>
@@ -236,6 +244,8 @@
   const ctx = cv.getContext('2d');
   const base = await (await fetch('data/base.json')).json();
   const land = await fetch('data/land.json').then(r => r.ok ? r.json() : null).catch(() => null);
+  // 夜空（実際の星と星座線）。無くても動く
+  const SKY = await fetch('data/stars.json').then(r => r.ok ? r.json() : null).catch(() => null);
   const SPOTS = await (await fetch('data/spots.json')).json();
   const INDEX = await (await fetch('data/index.json')).json();
   const NODES = base.nodes, EDGES = base.edges, COLORS = base.colors;
@@ -304,7 +314,6 @@
       landX[v] = ox + (landLon[v] * kx - x0) * s;
       landY[v] = oy + (-landLat[v] - y0) * s;
     }
-    makeStars();
     dirtyWalls();
   }
 
@@ -380,30 +389,119 @@
   }
   const deadness = () =>
     deadAt === null ? 0 : clamp01((t0 - deadAt) / DEAD_MIN);
-  // ---- 空（星）----
-  // 星は**画面に固定する**。地図ではなく空なので、ズームしても流れない。
-  // 夜が深まるほど数が増える — 電車という「星」が消え、本物の星が出てくる。
-  let stars = [];
-  function makeStars() {
-    const n = Math.round(W * H / 6200);
-    let sd = 20260305;
-    const rnd = () => (sd = (sd * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-    stars = [];
-    for (let i = 0; i < n; i++)
-      stars.push({ x: rnd() * W, y: rnd() * H, r: 0.45 + rnd() * rnd() * 1.7,
-                   q: rnd(), b: 0.55 + rnd() * 0.45 });
+  // ---- 空（本物の星）----
+  // **その日の、スライダーの時刻の、東京の空**をそのまま出す（Yale Bright Star Catalogue）。
+  // 天頂が画面の中心、外へ行くほど低い空の、等距離方位図法。**見上げている向き**なので東は左。
+  // 星は画面に固定する（地図ではなく空なので、ズームしても流れない）。
+  // 明るい星から順に出てくる — 本当の薄暮と同じ順。
+  const SITE = { lat: 35.681, lon: 139.767 };     // 東京駅
+  const D2R = Math.PI / 180;
+  let skyKey = '', skyPts = [], skySeg = [];
+
+  // 地方恒星時（度）。t はその日の 0:00 からの分（24 時超えは翌日）で、日本時間として扱う
+  function lstDeg(t) {
+    const d = new Date();
+    const ms = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(),
+                        Math.floor(t / 60) - 9, t % 60);
+    const jd = ms / 86400000 + 2440587.5;
+    return ((280.46061837 + 360.98564736629 * (jd - 2451545.0) + SITE.lon) % 360 + 360) % 360;
   }
 
-  function drawSky() {
+  // 赤経・赤緯（度）→ 画面の座標。地平線の下なら null
+  function project(ra, de, lst, R, cx, cy) {
+    const ha = (lst - ra) * D2R, dr = de * D2R, la = SITE.lat * D2R;
+    const sa = Math.sin(dr) * Math.sin(la) + Math.cos(dr) * Math.cos(la) * Math.cos(ha);
+    if (sa <= 0.01) return null;
+    const az = Math.atan2(-Math.sin(ha) * Math.cos(dr),
+                          Math.cos(la) * Math.sin(dr) - Math.sin(la) * Math.cos(dr) * Math.cos(ha));
+    const r = (1 - Math.asin(sa) / (Math.PI / 2)) * R;
+    return [cx - r * Math.sin(az), cy - r * Math.cos(az)];
+  }
+
+  function buildSky() {
+    const key = t0 + '|' + W + '|' + H;
+    if (key === skyKey) return;
+    skyKey = key; skyPts = []; skySeg = [];
+    if (!SKY) return;
+    const lst = lstDeg(t0), R = Math.hypot(W, H) * 0.52, cx = W / 2, cy = H / 2;
+    const mlim = SKY.mag / 10, mtop = -1.5;
+    for (const st of SKY.s) {
+      const p = project(st[0] / 10, st[1] / 10, lst, R, cx, cy);
+      if (!p) continue;
+      const q = clamp01((st[2] / 10 - mtop) / (mlim - mtop));   // 0 = いちばん明るい
+      skyPts.push([p[0], p[1], 0.6 + (1 - q) * 1.7, q, 0.5 + (1 - q) * 0.5]);
+    }
+    for (const seg of SKY.l) {
+      let line = [];
+      for (let i = 0; i < seg.length; i += 2) {
+        const p = project(seg[i] / 10, seg[i + 1] / 10, lst, R, cx, cy);
+        if (!p) { if (line.length > 1) skySeg.push(line); line = []; continue; }
+        line.push(p);
+      }
+      if (line.length > 1) skySeg.push(line);
+    }
+  }
+
+  // ---- 流れ星 ----
+  // 10 秒に 1 本ほど。細く短く、すっと消える（わざとらしくしない）
+  let meteor = null, nextMeteor = 0;
+  function stepMeteor(now) {
+    if (meteor && now - meteor.at > meteor.ms) {
+      meteor = null; nextMeteor = now + 7000 + Math.random() * 6000;
+    }
+    if (meteor || nn < 0.3) return;
+    if (!nextMeteor) { nextMeteor = now + 2500 + Math.random() * 6000; return; }
+    if (now < nextMeteor) return;
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    const a = (18 + Math.random() * 46) * D2R;
+    meteor = { x: W * (0.12 + Math.random() * 0.76), y: H * (0.04 + Math.random() * 0.4),
+               vx: dir * Math.cos(a), vy: Math.sin(a),
+               sp: 460 + Math.random() * 380, len: 55 + Math.random() * 75,
+               ms: 750 + Math.random() * 450, at: now };
+  }
+
+  function drawMeteor(now) {
+    if (!meteor) return;
+    const u = (now - meteor.at) / meteor.ms;
+    if (u < 0 || u > 1) return;
+    const d = meteor.sp * (now - meteor.at) / 1000;
+    const hx = meteor.x + meteor.vx * d, hy = meteor.y + meteor.vy * d;
+    const tx = hx - meteor.vx * meteor.len, ty = hy - meteor.vy * meteor.len;
+    const a = Math.min(1, u / 0.12) * Math.pow(1 - u, 1.4) * 0.95;
+    const g = ctx.createLinearGradient(hx, hy, tx, ty);
+    g.addColorStop(0, 'rgba(255,255,255,' + a.toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = g; ctx.lineWidth = 1.7;
+    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.globalAlpha = a; ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(hx, hy, 1.3, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawSky(now) {
     if (nn <= 0.01) return;
+    buildSky();
+    // 星座線は、夜が深くなってからうっすらと
+    const la = clamp01((nn - 0.5) / 0.4) * 0.10;
+    if (la > 0.004 && skySeg.length) {
+      ctx.strokeStyle = 'rgba(190,210,255,' + la.toFixed(3) + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (const line of skySeg) {
+        ctx.moveTo(line[0][0], line[0][1]);
+        for (let i = 1; i < line.length; i++) ctx.lineTo(line[i][0], line[i][1]);
+      }
+      ctx.stroke();
+    }
     ctx.fillStyle = '#ffffff';
-    for (const st of stars) {
-      const a = clamp01((nn - st.q * 0.88) / 0.14);
+    for (const st of skyPts) {
+      const a = clamp01((nn - st[3] * 0.82) / 0.18);
       if (a <= 0) continue;
-      ctx.globalAlpha = a * st.b;
-      ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = a * st[4];
+      ctx.beginPath(); ctx.arc(st[0], st[1], st[2], 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
+    drawMeteor(now);
   }
 
   const bgRGB = () => DUSK.map((v, i) => mixCh(v, DEEP[i], nn));
@@ -436,7 +534,7 @@
       ctx.fillRect(0, 0, W, H);
     }
 
-    drawSky();
+    drawSky(now);
 
     // 海岸線・県境
     if (LV) {
@@ -486,10 +584,16 @@
         if (s.state !== 'taxi' || s.off == null) continue;
         const A = act();
         const dim = A >= 0 && A !== s.node;
-        // 電車で行けるところまで。経路の形が来ていればそれをなぞる
+        // 電車で行けるところまで。経路の形が来ていればそれをなぞる。
+        // **ここが帰り方の主役**なので、暗い縁を敷いたうえで太く引く
+        // （路線図の上に重なるため、細いと沈んでしまう）
         if (s.off !== s.node) {
-          ctx.strokeStyle = dim ? 'rgba(255,209,102,.18)' : 'rgba(255,209,102,.55)';
-          ctx.lineWidth = 1.8; ctx.setLineDash([]);
+          ctx.setLineDash([]);
+          ctx.strokeStyle = 'rgba(0,0,0,' + (dim ? .22 : .5) + ')';
+          ctx.lineWidth = dim ? 4.2 : 6.4;
+          trace(s.trainPath, s.node, s.off);
+          ctx.strokeStyle = dim ? 'rgba(255,209,102,.28)' : 'rgba(255,209,102,.98)';
+          ctx.lineWidth = dim ? 2 : 3.6;
           trace(s.trainPath, s.node, s.off);
         }
         // そこから自宅までタクシー
@@ -1002,7 +1106,9 @@
 
   // スライダーの範囲は自宅ごとに決める。
   // **最初の終電の 20 分前 〜 最後の終電の 20 分後。** それより前も後も、見ていても何も起きない。
-  const SLACK = 20;
+  // 前は 20 分取っていたが、再生を遅くした（1 分 0.44 秒）ぶん、入りが長く感じる。
+  // 頭は 15 分（＝約 6.6 秒）、終わったあとは 20 分。
+  const HEAD = 15, TAIL = 20;
   function setRange(H) {
     const last = H.tFrom + (H.nt - 1) * H.tStep;
     let lo = null, hi = null;
@@ -1012,8 +1118,8 @@
       if (lo === null || v < lo) lo = v;
       if (hi === null || v > hi) hi = v;
     }
-    tFrom = lo === null ? H.tFrom : Math.max(H.tFrom, lo - SLACK);
-    tTo   = hi === null ? last    : Math.min(last, hi + SLACK);
+    tFrom = lo === null ? H.tFrom : Math.max(H.tFrom, lo - HEAD);
+    tTo   = hi === null ? last    : Math.min(last, hi + TAIL);
     timeEl.min = tFrom; timeEl.max = tTo;
     tEnds[0].textContent = fmt2(tFrom);
     tEnds[1].textContent = fmt2(tTo);
@@ -1147,11 +1253,8 @@
   }
 
   // ---- 操作 ----
-  const homeName = document.getElementById('home-name');
   function setHome(i) {
     home = i;
-    const h = INDEX.homes.find(x => x.node === i);
-    homeName.textContent = h ? h.dir + ' ' + Math.round(h.km) + 'km' : NODES[i].n;
     homeSel.value = i;
     picked = -1;
     deadAt = null;
@@ -1202,7 +1305,7 @@
   });
 
   // 1 分ずつ進める。5 分ずつだと「あと N 分」が飛んで見え、暗くなり方も段になる
-  const PLAY_STEP = 1, PLAY_MS = 220;
+  const PLAY_STEP = 1, PLAY_MS = 440;
   let playing = false, playTimer = null;
   function setPlaying(on) {
     playing = on;
@@ -1306,10 +1409,6 @@
 
   layout();
   cv.style.cursor = 'grab';
-  {
-    const h = INDEX.homes.find(x => x.node === home);
-    homeName.textContent = h ? h.dir + ' ' + Math.round(h.km) + 'km' : NODES[home].n;
-  }
   timeVal.textContent = fmt(t0);
   setNight(t0);
   timeEl.value = t0;
@@ -1319,12 +1418,13 @@
   let lastKey = '';
   function frame(now) {
     if (tw) stepTween(now);
+    stepMeteor(now);
     if (flashes.size)
       for (const [n, at] of [...flashes]) if (now - at > FLASH_MS) flashes.delete(n);
     syncBack();
     const key = [view.k.toFixed(3), view.tx | 0, view.ty | 0, W, H,
                  t0, home, hover, picked, dataSeq].join('|');
-    if (key !== lastKey || tw || flashes.size) { lastKey = key; draw(now); }
+    if (key !== lastKey || tw || flashes.size || meteor) { lastKey = key; draw(now); }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
