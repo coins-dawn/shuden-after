@@ -86,6 +86,10 @@
   .toggle:hover { color: var(--ink); border-color: rgba(238,241,246,.3); }
   .toggle[aria-pressed="true"] { color: #070a0f; background: var(--home); border-color: var(--home); }
   .toggle.wide { width: 100%; margin-top: 8px; padding: 7px 10px; }
+  /* 実験: 金額のかわりの色の目盛り */
+  .bar { height: 7px; border-radius: 4px; margin: 2px 0 4px; background:
+    linear-gradient(90deg, rgb(255,214,226), rgb(255,150,170), rgb(255,61,96), rgb(206,16,72)); }
+  .row[hidden] { display: none; }
   .hint { display: block; font-size: 10px; color: var(--faint); margin-top: 9px; }
 
   .list { position: absolute; top: 86px; right: 20px; z-index: 3; width: 286px;
@@ -194,6 +198,11 @@
     <div class="ends"><span id="t-from">—</span><span id="t-to">—</span></div>
     <button class="toggle wide" id="play" aria-pressed="false">時刻を進める</button>
     <span class="hint">ホイールで拡大／ドラッグで移動</span>
+  </div>
+  <div class="row" id="legend" hidden>
+    <div class="lab"><span>地図の色 ＝ 終電後のタクシー代</span></div>
+    <div class="bar"></div>
+    <div class="ends"><span>¥1,000</span><span>¥20,000 以上</span></div>
   </div>
 </div>
 
@@ -367,8 +376,26 @@
   const act = () => (picked >= 0 ? picked : hover);
 
   const COL = { train: '#5fd3b2', soon: '#ffd166', taxi: '#ff6b7a', home: '#ffd166' };
+
+  // ---- 実験（2026-10-06）: 地図からタクシー代の数字を消す ----
+  // そのかわり、点の**色**（淡いピンク → 深紅）・**大きさ**・まわりの**暈し**で
+  // 「いくらかさんでいるか」を出す。数字は右の一覧にだけ残す。
+  // **戻すときは MAP_FARE を true に**（枝 exp-fare-color。master には入れていない）。
+  const MAP_FARE = false;
+  const HEAT = [[255, 214, 226], [255, 150, 170], [255, 61, 96], [206, 16, 72]];
+  const FARE_LO = 800, FARE_HI = 22000;
+  // 0=安い … 1=高い。金額そのままの目盛り（広げると中くらいの額まで熱く見えてしまう）
+  const heatU = f => f == null ? 0 : clamp01((f - FARE_LO) / (FARE_HI - FARE_LO));
+  function heatRGB(f) {
+    const t = heatU(f) * (HEAT.length - 1);
+    const i = Math.min(HEAT.length - 2, Math.floor(t)), k = t - i;
+    return HEAT[i].map((v, j) => mixCh(v, HEAT[i + 1][j], k));
+  }
+  const heatCss = f => 'rgb(' + heatRGB(f).join(',') + ')';
+
   const stateColor = s => s.state === 'home' ? COL.home
-    : s.state === 'train' ? (s.left <= 15 ? COL.soon : COL.train) : COL.taxi;
+    : s.state === 'train' ? (s.left <= 15 ? COL.soon : COL.train)
+    : (MAP_FARE ? COL.taxi : heatCss(s.fare));
 
   const fmt = v => String(Math.floor(v / 60) % 24).padStart(2, '0') + ':' + String(v % 60).padStart(2, '0');
   const fmt2 = v => (v >= 1440 ? '翌 ' : '') + fmt(v);
@@ -707,6 +734,20 @@
         ctx.globalAlpha = 1;
       }
 
+      // 終電後は、点のまわりの暈しでタクシー代のかさみを出す（数字のかわり）
+      if (!MAP_FARE) for (const s of data.spots) {
+        if (s.state !== 'taxi' || s.fare == null || s.node === home) continue;
+        const A = act(), dim = A >= 0 && A !== s.node;
+        const u = heatU(s.fare), x = SX(s.node), y = SY(s.node);
+        const R = 11 + 30 * u;
+        const [r, g, b] = heatRGB(s.fare);
+        const gr = ctx.createRadialGradient(x, y, 1, x, y, R);
+        gr.addColorStop(0, 'rgba(' + r + ',' + g + ',' + b + ',' + ((0.10 + 0.20 * u) * (dim ? .35 : 1)).toFixed(3) + ')');
+        gr.addColorStop(1, 'rgba(' + r + ',' + g + ',' + b + ',0)');
+        ctx.fillStyle = gr;
+        ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill();
+      }
+
       // 候補の駅（点）
       for (const s of data.spots) {
         if (s.node === home) continue;          // 自宅の印と重なるので出さない
@@ -716,7 +757,9 @@
         const pulse = fa == null ? 0 : Math.max(0, 1 - (performance.now() - fa) / FLASH_MS);
         ctx.globalAlpha = dim ? .45 : 1;
         ctx.fillStyle = stateColor(s);
-        ctx.beginPath(); ctx.arc(x, y, (on ? 7.5 : 6) + 4 * pulse, 0, Math.PI * 2); ctx.fill();
+        const big = MAP_FARE || s.state !== 'taxi' ? 0 : 3.4 * heatU(s.fare);
+        ctx.beginPath();
+        ctx.arc(x, y, (on ? 7.5 : 6) + big + 4 * pulse, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = bgCss();
         ctx.beginPath(); ctx.arc(x, y, 2.4, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1;
@@ -728,7 +771,7 @@
         if (!p) continue;
         const A = act(), on = A === s.node;
         const txt = s.state === 'train' ? 'あと ' + s.left + '分'
-          : s.state === 'taxi' ? yen(s.fare) : '—';
+          : s.state === 'taxi' ? (MAP_FARE ? yen(s.fare) : '') : '—';
         chip(p.x, p.y, s.name, txt, stateColor(s), p.nameW, on, A >= 0 && !on);
         HITS.push([p.x - 7, p.y - 12, p.x + p.w + 7, p.y + 12, s.node]);
       }
@@ -1403,6 +1446,8 @@
       }
     }
     if (picked < 0) scrolled = -1;
+    const lg = document.getElementById('legend');
+    lg.hidden = MAP_FARE || !data.spots.some(x => x.state === 'taxi');
     document.getElementById('list-title').textContent =
       '終電のあとの帰り方（' + fmt(t0) + ' に出発）';
   }
