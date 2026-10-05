@@ -772,6 +772,8 @@
     for (let i = 0; i < ns; i++) { allDay[i] = v.getUint16(p, true); p += 2; }
     const first = new Uint16Array(ns);     // 始発を待ったときの到着時刻（翌朝の分）
     for (let i = 0; i < ns; i++) { first[i] = v.getUint16(p, true); p += 2; }
+    const firstDep = new Uint16Array(ns);  // その始発の発車時刻（＝待ち時間の終わり）
+    for (let i = 0; i < ns; i++) { firstDep[i] = v.getUint16(p, true); p += 2; }
     const n = ns * nt, cols = {};
     for (const k of ['off', 'at', 'km', 'fare', 'tr', 'tx']) {
       const a = new Uint16Array(n);
@@ -796,7 +798,7 @@
       }
       txPaths.push(a);
     }
-    return { node, ns, nt, tFrom, tStep, limit, allKm, allNight, allDay, first,
+    return { node, ns, nt, tFrom, tStep, limit, allKm, allNight, allDay, first, firstDep,
              trPaths, txPaths, ...cols };
   }
 
@@ -825,10 +827,12 @@
       row.fare = H.fare[i] === 0xFFFF ? null : H.fare[i];
       const a = isNight(t) ? H.allNight[si] : H.allDay[si];
       row.allTaxi = a === 0xFFFF ? null : a;
-      // 始発を待つという手もある。到着は翌朝なので 1440 分ぶん先
-      if (H.first[si] !== 0xFFFF) {
+      // 始発を待つという手もある。到着は翌朝なので 1440 分ぶん先。
+      // 待ち時間の終わりは「着く時刻」ではなく「乗れる時刻」なので、発車で測る
+      if (H.first[si] !== 0xFFFF && H.firstDep[si] !== 0xFFFF) {
         row.firstAt = H.first[si];
-        row.firstWait = 1440 + H.first[si] - t;
+        row.firstDep = H.firstDep[si];
+        row.firstWait = 1440 + H.firstDep[si] - t;
       }
       row.trainPath = H.tr[i] === 0xFFFF ? null
         : H.trPaths[H.tr[i]].map(id => [NODES[id].y, NODES[id].x]);
@@ -959,8 +963,8 @@
       } else { right = '—'; }
       // 終電後は「始発まで待つ」も選べる。お金を払うか、時間を払うか
       const alt = s.state === 'taxi' && s.firstWait != null
-        ? '<div class="alt">始発を待つなら <b>' + fmt(s.firstAt) + ' 着</b>（'
-          + span(s.firstWait) + '後）</div>'
+        ? '<div class="alt">始発を待つなら <b>' + fmt(s.firstDep) + ' 発</b>（あと '
+          + span(s.firstWait) + '）→ ' + fmt(s.firstAt) + ' 着</div>'
         : '';
       d.innerHTML = '<div><div class="nm">' + s.name
         + (s.state === 'taxi' && s.allTaxi && s.allTaxi > s.fare

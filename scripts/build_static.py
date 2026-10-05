@@ -24,6 +24,8 @@ GitHub Pages は静的ファイルしか置けないので、画面が要るも�
     uint16 候補ごとの「全部タクシー」の道路距離（10m 単位。0xFFFF = 不明）
     uint16 候補ごとの「全部タクシー」の運賃（深夜）／uint16 同（昼）。0xFFFF = 不明
     uint16 候補ごとの「始発を待ったときの自宅への到着時刻」（翌朝の分。0xFFFF = 帰れない）
+    uint16 候補ごとの「その始発の発車時刻」（翌朝の分。0xFFFF = 無し）
+           待っている時間の終わりは着く時刻ではなく**乗れる時刻**なので、両方を持つ
     以下 候補 × 時刻 ぶんの配列が 6 本:
       uint16 降りる駅のノード id（0xFFFF = 該当なし）
       uint16 降りる駅に着く時刻（分）
@@ -86,11 +88,19 @@ def main():
     # 2) 始発を待ったときの到着時刻（時刻には依らないので、候補ごとに 1 回でよい）
     #    手元のダイヤは 04:18 が最初の発車。終電後に駅で粘るなら、ここから帰ることになる。
     print("始発を待ったときの到着時刻を計算します…", flush=True)
-    FIRST = {}
+    FIRST, FIRSTDEP = {}, {}
     for s in SPOTS:
-        a = NET.earliest_arrival(s["node"], 4 * 60, horizon=300)
-        FIRST[s["node"]] = {h: (None if a[h] >= INF else a[h]) for h in IDX}
-        ok = sum(1 for v in FIRST[s["node"]].values() if v is not None)
+        a, par = NET.earliest_arrival_paths(s["node"], 4 * 60, horizon=300)
+        arr, dep = {}, {}
+        for h in IDX:
+            if a[h] >= INF:
+                arr[h] = dep[h] = None
+                continue
+            arr[h] = a[h]
+            d = NET.forward_depart(par, s["node"], h)
+            dep[h] = d[0] if d else None
+        FIRST[s["node"]], FIRSTDEP[s["node"]] = arr, dep
+        ok = sum(1 for v in arr.values() if v is not None)
         print("  %s → 帰れる自宅 %d/%d" % (s["name"], ok, len(IDX)), flush=True)
 
     # 3) 自宅ごとに貯める箱
@@ -158,7 +168,7 @@ def main():
     for h in IDX:
         d = data[h]
         buf = bytearray()
-        buf += b"SHDN" + struct.pack("<H", 3)
+        buf += b"SHDN" + struct.pack("<H", 4)
         buf += struct.pack("<HBHHB", h, ns, nt, T_FROM, T_STEP)
         for s in SPOTS:
             lv = LIM[h][s["node"]]
@@ -172,6 +182,9 @@ def main():
                 buf += struct.pack("<H", NONE16 if f is None or f >= NONE16 else f)
         for s in SPOTS:
             v = FIRST[s["node"]][h]
+            buf += struct.pack("<H", NONE16 if v is None else v)
+        for s in SPOTS:
+            v = FIRSTDEP[s["node"]][h]
             buf += struct.pack("<H", NONE16 if v is None else v)
         for key in ("off", "at", "km", "fare", "tr", "tx"):
             buf += struct.pack("<%dH" % (ns * nt), *d[key])

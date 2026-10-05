@@ -233,6 +233,27 @@ class Network:
                 break
         return label, parent
 
+    def forward_depart(self, parent, origin, target):
+        """origin → target の経路で、**最初に乗る便の発車時刻と、その駅**を返す。
+
+        待っている時間の終わりは「着く時刻」ではなく「乗れる時刻」なので、
+        始発待ちの表示にはこちらが要る。乗る便が無ければ None。
+        """
+        cur, guard, first = target, 0, None
+        while cur != origin and guard < 60:
+            guard += 1
+            p = parent[cur]
+            if p is None:
+                return None
+            if p[0] == "w":
+                cur = p[1]
+            else:
+                _, ti, b, k = p
+                seq = self.trips[ti]
+                first = (seq[b][2], seq[b][0])     # (発車時刻, 乗る駅)
+                cur = seq[b][0]
+        return first
+
     def forward_path(self, parent, origin, target):
         """earliest_arrival_paths の親から、origin → target の通る駅を並べて返す。"""
         out, cur, guard = [], target, 0
