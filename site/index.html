@@ -600,29 +600,40 @@
     }
 
     // 帰り道（電車の区間＋タクシーの区間）
+    ICONS.length = 0;
     if (data) {
       for (const s of data.spots) {
         if (s.state !== 'taxi' || s.off == null) continue;
         const A = act();
         const dim = A >= 0 && A !== s.node;
+        // **1 つ選んでいるときは、その帰り方だけを描く。**
+        // 伏せた線でも、同じ区間を通るものが重なると濃くなって（5 本重なれば
+        // 1-0.9^5 = 0.41）選んだ線のように見えてしまう。
+        // 23:59 の浦和では 新宿・渋谷・錦糸町・新橋・北千住 の 5 本が
+        // 御徒町 → 南浦和 を一緒に通るので、そこだけ白い実線が浮かび上がっていた。
+        if (dim && picked >= 0) continue;
         // 帰り道は**白**。路線が灰色に抜けたあとの画面でいちばん強い色になる。
         // 電車は実線、タクシーは破線。太さで区別しない（細いまま読める）
         if (s.off !== s.node) {
           ctx.setLineDash([]);
-          ctx.strokeStyle = dim ? 'rgba(255,255,255,.20)' : 'rgba(255,255,255,.95)';
+          ctx.strokeStyle = dim ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.95)';
           ctx.lineWidth = dim ? 1.4 : 1.9;
           trace(s.trainPath, s.node, s.off);
+          if (!dim) placeIcon(pathPts(s.trainPath, s.node, s.off), 'train', picked === s.node);
         }
         // そこから自宅までタクシー
-        ctx.strokeStyle = dim ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.8)';
+        ctx.strokeStyle = dim ? 'rgba(255,255,255,.09)' : 'rgba(255,255,255,.8)';
         ctx.lineWidth = dim ? 1.4 : 1.9; ctx.setLineDash([5, 4]);
         trace(s.taxiPath, s.off, home);
         ctx.setLineDash([]);
+        if (!dim) placeIcon(pathPts(s.taxiPath, s.off, home), 'taxi', picked === s.node);
         // 降りる駅（実線と破線の変わり目）
-        ctx.fillStyle = dim ? 'rgba(255,255,255,.28)' : '#ffffff';
+        ctx.fillStyle = dim ? 'rgba(255,255,255,.18)' : '#ffffff';
         ctx.beginPath(); ctx.arc(SX(s.off), SY(s.off), 2.6, 0, Math.PI * 2); ctx.fill();
       }
     }
+
+    drawIcons();
 
     // ---- 札 ----
     // 置き場所は labelLayout() が 自宅・ビュー ごとに 1 回だけ決める（時刻では動かさない）。
@@ -722,6 +733,101 @@
         HITS.push([p.x - 7, p.y - 12, p.x + p.w + 7, p.y + 12, s.node]);
       }
     }
+  }
+
+  // ---- 経路に置く乗り物の印 ----
+  // 実線か破線かだけだと何に乗るのか伝わらないので、区間の真ん中に小さな印を重ねる。
+  // 丸い下敷きを敷いて、ふちは**電車＝実線・タクシー＝破線**にして線と揃える。
+  const ICONS = [];
+  function pathPts(path, a, b) {
+    if (path && path.length > 1)
+      return path.map(q => [GX(q[1]) * view.k + view.tx, GY(q[0]) * view.k + view.ty]);
+    return [[SX(a), SY(a)], [SX(b), SY(b)]];
+  }
+  // 線に沿ってちょうど半分のところ
+  function midOf(pts) {
+    const seg = [];
+    let L = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const d = Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1]);
+      seg.push(d); L += d;
+    }
+    if (!L) return null;
+    let t = L / 2;
+    for (let i = 0; i < seg.length; i++) {
+      if (t <= seg[i]) {
+        const u = seg[i] ? t / seg[i] : 0;
+        return [pts[i][0] + (pts[i+1][0] - pts[i][0]) * u,
+                pts[i][1] + (pts[i+1][1] - pts[i][1]) * u, L];
+      }
+      t -= seg[i];
+    }
+    return [pts[pts.length-1][0], pts[pts.length-1][1], L];
+  }
+
+  function placeIcon(pts, kind, force) {
+    const m = midOf(pts);
+    if (!m) return;
+    const [x, y, L] = m;
+    const r = force ? 11 : 9;
+    if (L < r * 4) return;                       // 短すぎる区間には置かない
+    if (x < 8 || x > W - 8 || y < 8 || y > H - 8) return;
+    if (!force) {
+      const keep = 34;
+      for (const o of ICONS)
+        if ((o[0] - x) ** 2 + (o[1] - y) ** 2 < keep * keep) return;   // 混んだところは 1 つだけ
+    }
+    ICONS.push([x, y, kind, r]);
+  }
+
+  function drawIcons() {
+    for (const [x, y, kind, r] of ICONS) {
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(' + bgRGB().join(',') + ',.94)'; ctx.fill();
+      ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255,255,255,.9)';
+      if (kind === 'taxi') ctx.setLineDash([3.2, 2.4]);
+      ctx.stroke(); ctx.setLineDash([]);
+      const u = r / 10;
+      ctx.fillStyle = '#ffffff';
+      if (kind === 'train') {
+        // 正面から見た電車。窓の帯と、下にふたつのライト
+        rrect(x - 4.4 * u, y - 6 * u, 8.8 * u, 11 * u, 2.4 * u); ctx.fill();
+        ctx.fillStyle = 'rgba(' + bgRGB().join(',') + ',1)';
+        ctx.fillRect(x - 3 * u, y - 4.4 * u, 6 * u, 3.4 * u);
+        ctx.beginPath();
+        ctx.arc(x - 2 * u, y + 2.6 * u, 0.95 * u, 0, Math.PI * 2);
+        ctx.arc(x + 2 * u, y + 2.6 * u, 0.95 * u, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // 横から見た車。屋根の行灯つき
+        rrect(x - 6.2 * u, y - 1.2 * u, 12.4 * u, 4.6 * u, 1.5 * u); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x - 3.4 * u, y - 1.2 * u); ctx.lineTo(x - 2.2 * u, y - 4.4 * u);
+        ctx.lineTo(x + 2.2 * u, y - 4.4 * u); ctx.lineTo(x + 3.6 * u, y - 1.2 * u);
+        ctx.closePath(); ctx.fill();
+        ctx.fillRect(x - 1.2 * u, y - 6.3 * u, 2.4 * u, 1.6 * u);
+        ctx.fillStyle = 'rgba(' + bgRGB().join(',') + ',1)';
+        ctx.beginPath();
+        ctx.arc(x - 3.3 * u, y + 3.4 * u, 1.5 * u, 0, Math.PI * 2);
+        ctx.arc(x + 3.3 * u, y + 3.4 * u, 1.5 * u, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(x - 3.3 * u, y + 3.4 * u, 0.6 * u, 0, Math.PI * 2);
+        ctx.arc(x + 3.3 * u, y + 3.4 * u, 0.6 * u, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  function rrect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
   }
 
   // ---- 札の配置 ----
