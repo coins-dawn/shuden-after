@@ -107,8 +107,8 @@ def main():
         if (k + 1) % 10 == 0:
             print("  %d/%d 自宅  これまで %d 件  食い違い %d"
                   % (k + 1, nh, tot, bad), flush=True)
-    print("自宅 %d x 候補 10 x 時刻 %d = %d 件を照合  食い違い %d 件"
-          % (nh, len(times), tot, bad))
+    print("自宅 %d x 候補 %d x 時刻 %d = %d 件を照合  食い違い %d 件"
+          % (nh, len(server.SPOTS), len(times), tot, bad))
     sys.exit(1 if bad else 0)
 
 
