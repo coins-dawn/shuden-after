@@ -63,6 +63,8 @@
   .item:last-child { border-bottom: 0; }
   .item:hover, .item.on { background: rgba(238,241,246,.06); }
   .item.on { box-shadow: inset 2px 0 0 var(--home); }
+  .item.sel { background: rgba(255,209,102,.10); box-shadow: inset 3px 0 0 var(--home); }
+  .item.sel .nm { color: var(--home); }
   .item .nm { font-size: 13.5px; }
   .item .nm small { color: var(--faint); font-size: 10px; margin-left: 5px; }
   .item .vl { font-size: 14px; font-weight: 600; white-space: nowrap; }
@@ -205,6 +207,9 @@
   let t0 = 1320;
   let data = null;
   let hover = -1;
+  let picked = -1;       // 一覧や札をタップして選んだ駅。hover より優先する
+  let anim = null;       // ズームの動き。動いている間は札を描かない
+  const act = () => (picked >= 0 ? picked : hover);
 
   const COL = { train: '#5fd3b2', soon: '#ffd166', taxi: '#ff6b7a', home: '#ffd166' };
   const stateColor = s => s.state === 'home' ? COL.home
@@ -258,7 +263,8 @@
     if (data) {
       for (const s of data.spots) {
         if (s.state !== 'taxi' || s.off == null) continue;
-        const dim = hover >= 0 && hover !== s.node;
+        const A = act();
+        const dim = A >= 0 && A !== s.node;
         // 電車で行けるところまで。経路の形が来ていればそれをなぞる
         if (s.off !== s.node) {
           ctx.strokeStyle = dim ? 'rgba(255,209,102,.18)' : 'rgba(255,209,102,.55)';
@@ -277,8 +283,9 @@
     }
 
     // ---- 札 ----
-    // 置き場所は labelLayout() が 自宅・ビュー ごとに 1 回だけ決める（時刻では動かさない）
-    const lay = labelLayout();
+    // 置き場所は labelLayout() が 自宅・ビュー ごとに 1 回だけ決める（時刻では動かさない）。
+    // ズームが動いている間は置き場所を探し直すことになるので、札は描かない。
+    const lay = anim ? null : labelLayout();
     HITS.length = 0;
 
     // 自宅
@@ -286,16 +293,16 @@
     ctx.beginPath(); ctx.arc(SX(home), SY(home), 9, 0, Math.PI * 2); ctx.stroke();
     ctx.fillStyle = '#ffd166';
     ctx.beginPath(); ctx.arc(SX(home), SY(home), 3, 0, Math.PI * 2); ctx.fill();
-    chip(lay.home.x, lay.home.y, '自宅・' + NODES[home].n, '', '#ffd166', 0, false, false);
+    if (lay) chip(lay.home.x, lay.home.y, '自宅・' + NODES[home].n, '', '#ffd166', 0, false, false);
 
     if (data) {
       // 札と点をつなぐ線。近い札でも短い線を出す。
       // これが無いと、どの札がどの点のものか分からない
       ctx.setLineDash([]);
       for (const s of data.spots) {
-        const p = lay.at[s.node];
+        const p = lay && lay.at[s.node];
         if (!p) continue;
-        const on = hover === s.node, dim = hover >= 0 && !on;
+        const A = act(), on = A === s.node, dim = A >= 0 && !on;
         const x = SX(s.node), y = SY(s.node);
         const ex = p.ax - 4 * p.side, ey = p.ay;
         const d = Math.hypot(ex - x, ey - y);
@@ -328,7 +335,7 @@
       for (const s of data.spots) {
         if (s.node === home) continue;          // 自宅の印と重なるので出さない
         const x = SX(s.node), y = SY(s.node);
-        const on = hover === s.node, dim = hover >= 0 && !on;
+        const A = act(), on = A === s.node, dim = A >= 0 && !on;
         ctx.globalAlpha = dim ? .45 : 1;
         ctx.fillStyle = stateColor(s);
         ctx.beginPath(); ctx.arc(x, y, on ? 7.5 : 6, 0, Math.PI * 2); ctx.fill();
@@ -339,12 +346,12 @@
 
       // 札
       for (const s of data.spots) {
-        const p = lay.at[s.node];
+        const p = lay && lay.at[s.node];
         if (!p) continue;
-        const on = hover === s.node;
+        const A = act(), on = A === s.node;
         const txt = s.state === 'train' ? 'あと ' + s.left + '分'
           : s.state === 'taxi' ? yen(s.fare) : '—';
-        chip(p.x, p.y, s.name, txt, stateColor(s), p.nameW, on, hover >= 0 && !on);
+        chip(p.x, p.y, s.name, txt, stateColor(s), p.nameW, on, A >= 0 && !on);
         HITS.push([p.x - 7, p.y - 12, p.x + p.w + 7, p.y + 12, s.node]);
       }
     }
@@ -381,14 +388,15 @@
                   Math.ceil((r.right + 10) / 20) * 20, Math.ceil(bot / 20) * 20]);
     }
     // 時刻は鍵に入れない。文字幅が変わっても札が動かないようにするため
-    const key = [home, view.k.toFixed(3), Math.round(view.tx), Math.round(view.ty),
+    const key = [home, picked, view.k.toFixed(3), Math.round(view.tx), Math.round(view.ty),
       W, H, walls.join(';')].join('|');
     if (key === layKey && layVal) return layVal;
 
     // 値は時刻で変わるので、取りうるいちばん広い文字で場所を取っておく
     // （「あと 155分」は「¥00,000」より広い）
     const VW = Math.max(measure('¥00,000', 13.5), measure('あと 999分', 13.5));
-    const sp = SPOTS.filter(s => s.node !== home).map(s => {
+    // 1 つ選んでいるときは、その札だけ置く（ほかは点だけ残して邪魔をしない）
+    const sp = SPOTS.filter(s => s.node !== home && (picked < 0 || s.node === picked)).map(s => {
       const nw = measure(s.name, 13);
       return { node: s.node, name: s.name, x: SX(s.node), y: SY(s.node), nw, w: nw + 12 + VW };
     });
@@ -538,19 +546,96 @@
     ctx.globalAlpha = 1;
   }
 
+  // 緯度経度 → 地図の座標（ビューをかける前）
+  const GX = lon => gox + (lon * kx - gx0) * gs;
+  const GY = lat => goy + (-lat - gy0) * gs;
+
   // 経路の形（[[lat, lon], ...]）をなぞる。無ければ 2 駅を直線で結ぶ
   function trace(path, a, b) {
     ctx.beginPath();
     if (path && path.length > 1) {
       for (let i = 0; i < path.length; i++) {
-        const x = (gox + (path[i][1] * kx - gx0) * gs) * view.k + view.tx;
-        const y = (goy + (-path[i][0] - gy0) * gs) * view.k + view.ty;
+        const x = GX(path[i][1]) * view.k + view.tx;
+        const y = GY(path[i][0]) * view.k + view.ty;
         i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
       }
     } else {
       ctx.moveTo(SX(a), SY(a)); ctx.lineTo(SX(b), SY(b));
     }
     ctx.stroke();
+  }
+
+  // ---- 一覧や札をタップしたときの、強調とズーム ----
+
+  // パネルに隠れない範囲。狭い画面では操作パネルが横いっぱいなので下に避ける
+  function freeArea() {
+    const box = sel => {
+      const el = document.querySelector(sel);
+      return el && getComputedStyle(el).display !== 'none' ? el.getBoundingClientRect() : null;
+    };
+    let L = 20, R = W - 20, T = 96, B = H - 64;
+    const list = box('.list'), panel = box('.panel');
+    if (list) R = Math.min(R, list.left - 24);
+    if (panel) {
+      if (panel.right + 24 + 200 < R) L = Math.max(L, panel.right + 24);
+      else T = Math.max(T, panel.bottom + 20);
+    }
+    return [L, T, R, B];
+  }
+
+  // その帰り方が通るところ（出先・降りる駅・自宅・経路の形）を囲む
+  function routeBox(s) {
+    const xs = [], ys = [];
+    const add = (lat, lon) => { xs.push(GX(lon)); ys.push(GY(lat)); };
+    add(NODES[s.node].y, NODES[s.node].x);
+    add(NODES[home].y, NODES[home].x);
+    if (s.off != null) add(NODES[s.off].y, NODES[s.off].x);
+    for (const p of (s.trainPath || [])) add(p[0], p[1]);
+    for (const p of (s.taxiPath || [])) add(p[0], p[1]);
+    return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  }
+
+  // 四角が収まるようにビューを動かす（少し動かして見せる）
+  function flyTo(box) {
+    const [L, T, R, B] = freeArea();
+    const pad = 46;
+    const w = Math.max(box[2] - box[0], 1), h = Math.max(box[3] - box[1], 1);
+    const k = Math.max(0.7, Math.min(24,
+      Math.min((R - L - pad * 2) / w, (B - T - pad * 2) / h)));
+    const cx = (box[0] + box[2]) / 2, cy = (box[1] + box[3]) / 2;
+    tween(k, (L + R) / 2 - cx * k, (T + B) / 2 - cy * k);
+  }
+
+  function tween(k, tx, ty) {
+    const from = { k: view.k, tx: view.tx, ty: view.ty };
+    const t0 = performance.now(), ms = 340;
+    if (anim) cancelAnimationFrame(anim);
+    const step = now => {
+      const u = Math.min(1, (now - t0) / ms);
+      const e = 1 - Math.pow(1 - u, 3);
+      view.k = from.k + (k - from.k) * e;
+      view.tx = from.tx + (tx - from.tx) * e;
+      view.ty = from.ty + (ty - from.ty) * e;
+      zoomVal.textContent = view.k.toFixed(1) + '×';
+      if (u < 1) { anim = requestAnimationFrame(step); draw(); }
+      else { anim = null; draw(); }
+    };
+    anim = requestAnimationFrame(step);
+  }
+
+  // 一覧の行・地図の札のどちらをタップしても同じ
+  function setPicked(n) {
+    if (picked === n) {                       // もう一度押したら戻す
+      picked = -1;
+      tween(1, 0, 0);
+      renderList();
+      return;
+    }
+    picked = n;
+    const s = data && data.spots.find(x => x.node === n);
+    renderList();
+    if (s && s.state !== 'home') flyTo(routeBox(s));
+    else draw();
   }
 
   function measure(text, size) {
@@ -728,8 +813,10 @@
         + '<div class="col"><div class="vl" style="color:' + col + '">' + right + '</div></div>';
       d.dataset.node = s.node;
       if (hover === s.node) d.classList.add('on');
+      if (picked === s.node) d.classList.add('sel');
       d.onmouseenter = () => setHover(s.node);
       d.onmouseleave = () => setHover(-1);
+      d.onclick = () => setPicked(s.node);
       box.appendChild(d);
     }
     document.getElementById('list-title').textContent =
@@ -740,6 +827,7 @@
   const homeName = document.getElementById('home-name');
   function setHome(i) {
     home = i; homeName.textContent = NODES[i].n;
+    picked = -1;
     load();
   }
 
@@ -793,6 +881,8 @@
   document.getElementById('zoom-in').onclick = () => zoomAt(W / 2, H / 2, 1.5);
   document.getElementById('zoom-out').onclick = () => zoomAt(W / 2, H / 2, 1 / 1.5);
   document.getElementById('zoom-reset').onclick = () => {
+    if (anim) { cancelAnimationFrame(anim); anim = null; }
+    picked = -1; renderList();
     view.k = 1; view.tx = 0; view.ty = 0; zoomVal.textContent = '1.0×'; draw();
   };
   cv.addEventListener('wheel', e => {
@@ -828,7 +918,7 @@
     setHover(spotAt(e.clientX, e.clientY));
     // 札の上では、その裏にたまたまある駅の吹き出しを出さない
     if (labelAt(e.clientX, e.clientY) >= 0) {
-      tip.style.display = 'none'; cv.style.cursor = 'default'; return;
+      tip.style.display = 'none'; cv.style.cursor = 'pointer'; return;
     }
     const i = nearest(e.clientX, e.clientY);
     if (i < 0) { tip.style.display = 'none'; cv.style.cursor = 'grab'; return; }
@@ -841,7 +931,9 @@
   cv.addEventListener('pointerup', e => {
     if (!drag) return;
     const was = drag.moved; drag = null; cv.style.cursor = 'grab';
-    if (was || labelAt(e.clientX, e.clientY) >= 0) return;
+    if (was) return;
+    const n = labelAt(e.clientX, e.clientY);
+    if (n >= 0) { setPicked(n); return; }      // 札をタップ＝その帰り方を見る
     const i = nearest(e.clientX, e.clientY);
     if (i >= 0) setHome(i);
   });
