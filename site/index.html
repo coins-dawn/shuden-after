@@ -497,7 +497,8 @@
       meteor = null; nextMeteor = now + 7000 + Math.random() * 6000;
     }
     if (meteor || nn < 0.3) return;
-    if (!nextMeteor) { nextMeteor = now + 2500 + Math.random() * 6000; return; }
+    // 1 本目は、星が出そろうまで待つ（夜が深まってすぐ流れると気が散る）
+    if (!nextMeteor) { nextMeteor = now + 12500 + Math.random() * 6000; return; }
     if (now < nextMeteor) return;
     const dir = Math.random() < 0.5 ? -1 : 1;
     const a = (18 + Math.random() * 46) * D2R;
