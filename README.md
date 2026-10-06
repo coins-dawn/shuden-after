@@ -59,7 +59,7 @@ site/data/home/*.bin   起点ごとの計算結果（1 ファイル 35KB ほど�
 
 | | |
 |---|---|
-| 最初に落ちるもの | **400KB**（地図 199KB・画面 84KB・海岸線 54KB・星 22KB・起点 1 件 35KB ほか）。**gzip で 105KB** |
+| 最初に落ちるもの | **346KB**（地図 201KB・画面 85KB・星 22KB・起点 1 件 35KB ほか）。**gzip で 90KB** |
 | 起点を変えたとき | **その起点のファイル 1 つだけ**（31〜41KB） |
 | 時刻を変えたとき | **通信なし**（手元のデータだけで引ける） |
 | `site/` 全体 | **747KB / 18 ファイル** |
@@ -84,7 +84,7 @@ site/data/home/*.bin   起点ごとの計算結果（1 ファイル 35KB ほど�
 | 駅の位置・名前と路線の線 | [国土数値情報 鉄道 N02（2025年）](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-v3_1.html) | 国土数値情報 利用約款 |
 | 星 | [Yale Bright Star Catalogue, 5th Revised Ed.](https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50)（Hoffleit & Warren 1991 / VizieR V/50） | 出典表示 |
 | 星座線 | [d3-celestial](https://github.com/ofrohn/d3-celestial) | BSD 3-Clause（下記） |
-| 海岸線・県境 | [国土数値情報 行政区域 N03](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-v3_1.html) | 国土数値情報 利用約款 |
+| 海岸線・県境（`data/land.json`。**いまは画面に出していない**） | [国土数値情報 行政区域 N03](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-v3_1.html) | 国土数値情報 利用約款 |
 | 道路網 | [OpenStreetMap](https://www.openstreetmap.org/) | ODbL |
 
 - **東京都交通局**: CC BY 4.0

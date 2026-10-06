@@ -281,8 +281,14 @@
   let ctx = cv.getContext('2d');
   const baseCv = document.createElement('canvas');
   const baseCtx = baseCv.getContext('2d');
+  // 海岸線・県境を敷くか。**いまは敷かない**（2026-10-06 ユーザー指示）。
+  // 県境が線路と紛らわしく、消すと路線の色が素直に読める。
+  // 戻すときは true に（data/land.json はそのまま置いてある）。
+  const LAND_LINES = false;
+
   const base = await (await fetch('data/base.json')).json();
-  const land = await fetch('data/land.json').then(r => r.ok ? r.json() : null).catch(() => null);
+  const land = LAND_LINES
+    ? await fetch('data/land.json').then(r => r.ok ? r.json() : null).catch(() => null) : null;
   // 夜空（実際の星と星座線）。無くても動く
   const SKY = await fetch('data/stars.json').then(r => r.ok ? r.json() : null).catch(() => null);
   const SPOTS = await (await fetch('data/spots.json')).json();
@@ -867,7 +873,6 @@
   // さらに**ゆっくり明滅**させる。位相は駅ごとにずらす（一斉に光ると機械的になる）。
   // **元の実線／破線に戻すときは FRAGILE を false に。**
   const FRAGILE = true;
-  const LAND_LINES = true;     // 海岸線・県境を敷くか（切り替え用）
   const BREATH_MS = 1700;      // 明滅の速さ（sin の周期の目安）
   const DRIFT_PX = 15;         // 芯が流れる速さ（px/秒）。流れる向きは自宅へ
   const DASH_TRAIN = [17, 3.5], DASH_TAXI = [5, 4.5];
