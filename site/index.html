@@ -1918,6 +1918,13 @@
     await goTime(nx + 1);                 // ここで「いま行きました」が出る
   }
   const resume = () => { if (!playing) setPlaying(true); };
+  // ⚠ setPicked は同じ駅をもう一度渡すと**解除**になる。
+  // 段をまたいで選びっぱなしにしたいので、選び直さずに入れ直す
+  const focus = n => {
+    if (picked !== n) { setPicked(n); return; }
+    const sp = data && data.spots.find(x => x.node === n);
+    if (sp && sp.state === 'taxi') flyTo(routeBox(sp));   // 時刻が動いて経路が変わっていることがある
+  };
   const pause = () => { setPlaying(false); clearPicked(); };
 
   // at … その段に入ったときの時刻。**どの順に飛んでも、説明と時刻が食い違わないようにする**
@@ -1947,10 +1954,10 @@
     { ms: 9000, mark: () => spotEl('.toast', 6), at: () => tFrom + 60,
       setup: async () => { clearPicked(); resume(); toastPin = true; clearTimeout(toastTimer); await makeToast(); },
       html: '終電が行った駅は、上に<b>「いま行きました」</b>と出ます。地図では、その駅から輪が広がって消えます。' },
-    { ms: 10000, at: () => tFrom + 89, setup: () => { resume(); setPicked(SPOTS.find(x => x.name === '横浜').node); },
+    { ms: 10000, at: () => tFrom + 89, setup: () => { resume(); focus(SPOTS.find(x => x.name === '横浜').node); },
       html: 'ひとつ選ぶと、その帰り方だけが残ります。<b>白い線路が電車</b>、<b>白い破線がタクシー</b>です。時刻はそのまま進みます。' },
     { ms: 10000, mark: () => spotEl('.item.sel', 4), at: () => tFrom + 111,
-      setup: () => { resume(); setPicked(SPOTS.find(x => x.name === '横浜').node); },
+      setup: () => { resume(); focus(SPOTS.find(x => x.name === '横浜').node); },
       html: '右の一覧に、<b>何時にどの路線に乗るか</b>が出ます。どこで乗り換えるかも分かります。' },
     { ms: 8000, setup: pause,
       html: '自宅を変えると、終電も帰り方も運賃も変わります。<b>痛みは距離ではなく、終電の残り方で決まります。</b>' },
