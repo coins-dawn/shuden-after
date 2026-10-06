@@ -3,7 +3,7 @@
 
 これがあれば、アプリを動かすときに osrm-routed は要らない。
 
-    docker run -d --rm -p 5050:5000 -v /var/tmp/odc2026-osrm:/data \
+    docker run -d --rm -p 5050:5000 -v /var/tmp/shuden-osrm:/data \
       osrm/osrm-backend osrm-routed --algorithm mld /data/tokyo.osrm
     python3 scripts/build_taxipaths.py          # 20 分ほど
 

@@ -32,7 +32,7 @@ OUT = ROOT / "site" / "data" / "stars.json"
 BSC = "http://cdsarc.u-strasbg.fr/ftp/V/50/catalog.gz"
 LINES = "https://raw.githubusercontent.com/ofrohn/d3-celestial/master/data/constellations.lines.json"
 MAGLIM = 4.6          # これより暗い星は出さない（地図の上なので、出しすぎると邪魔）
-CACHE = Path("/var/tmp/odc2026-stars")
+CACHE = Path("/var/tmp/shuden-stars")
 
 
 def fetch(url, name):

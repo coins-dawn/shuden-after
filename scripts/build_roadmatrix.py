@@ -6,14 +6,14 @@ OSRM の `/table` を使う。直線距離に係数を掛ける手もあるが�
 
 事前に OSRM のグラフを用意しておくこと:
 
-    osmium extract -b 138.90,35.10,140.70,36.30 -s smart -o /var/tmp/odc2026-osrm/tokyo.osm.pbf <kanto.osm.pbf>
-    docker run --rm -v /var/tmp/odc2026-osrm:/data osrm/osrm-backend osrm-extract   -p /opt/car.lua /data/tokyo.osm.pbf
-    docker run --rm -v /var/tmp/odc2026-osrm:/data osrm/osrm-backend osrm-partition /data/tokyo.osrm
-    docker run --rm -v /var/tmp/odc2026-osrm:/data osrm/osrm-backend osrm-customize /data/tokyo.osrm
+    osmium extract -b 138.90,35.10,140.70,36.30 -s smart -o /var/tmp/shuden-osrm/tokyo.osm.pbf <kanto.osm.pbf>
+    docker run --rm -v /var/tmp/shuden-osrm:/data osrm/osrm-backend osrm-extract   -p /opt/car.lua /data/tokyo.osm.pbf
+    docker run --rm -v /var/tmp/shuden-osrm:/data osrm/osrm-backend osrm-partition /data/tokyo.osrm
+    docker run --rm -v /var/tmp/shuden-osrm:/data osrm/osrm-backend osrm-customize /data/tokyo.osrm
 
 このスクリプトが osrm-routed を立ち上げて、終わったら落とす。
 **OSRM のグラフは mmap を使うので、共有フォルダ（/vagrant）の上では落ちる。**
-ローカルディスク（既定 /var/tmp/odc2026-osrm）に置くこと。
+ローカルディスク（既定 /var/tmp/shuden-osrm）に置くこと。
 
 出力:
   data/road_nodes.json  対象にしたノード番号の並び
@@ -32,7 +32,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 DATA = ROOT / "data"
 WEB = ROOT / "web" / "data"
-OSRM_DIR = os.environ.get("OSRM_DIR", "/var/tmp/odc2026-osrm")
+OSRM_DIR = os.environ.get("OSRM_DIR", "/var/tmp/shuden-osrm")
 IMAGE = "osrm/osrm-backend:latest"
 PORT = 5111
 CHUNK = 80          # 1 回の /table で投げる出発地の数
