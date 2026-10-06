@@ -269,8 +269,11 @@ def main():
     op_of = {}
     for li, op in zip(NET.trip_line, NET.trip_op):
         op_of.setdefault(li, op)
+    # 公開するのは**画面が使う分だけ**。方角・距離・参考値（飲み屋の件数）・
+    # ODPT 由来の座標は出さない（地図の座標は N02 のものを base.json に入れてある）
+    slim = lambda a: [{"node": x["node"], "name": x["name"]} for x in a]
     idx = {
-        "homes": HOMES,
+        "homes": slim(HOMES),
         "lines": [[nm, RAIL["op"].get(op_of.get(nm, ""), 0)] for nm in LINES],
         "railways": len({li for li in NET.trip_line if li}),
         "spots": [s["node"] for s in SPOTS],
@@ -280,10 +283,14 @@ def main():
                  "night": server.NIGHT_RATE},
     }
     (OUT / "index.json").write_text(json.dumps(idx, separators=(",", ":")), encoding="utf-8")
-    for f in ("land.json", "spots.json", "homes.json"):
-        src = ROOT / "web" / "data" / f
-        if src.exists():
-            shutil.copy(src, OUT / f)
+    src = ROOT / "web" / "data" / "land.json"
+    if src.exists():
+        shutil.copy(src, OUT / "land.json")
+    (OUT / "spots.json").write_text(json.dumps(slim(SPOTS), separators=(",", ":"),
+                                               ensure_ascii=False), encoding="utf-8")
+    for old in ("homes.json",):          # 画面は読んでいないので置かない
+        if (OUT / old).exists():
+            (OUT / old).unlink()
 
     # 地図の下地は **国土数値情報 N02** から作る（scripts/build_rail.py）。
     # ODPT の odpt:Station / odpt:Railway は**配らない**（基本ライセンス第8条4項(1)）。

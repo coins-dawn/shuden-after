@@ -1,27 +1,24 @@
 #!/usr/bin/env python3
-"""タクシー区間（降りる駅 → 自宅）の道の形を全部先に計算して data/taxi_paths.bin に書く。
+"""道路の経路の形を全部先に計算して data/taxi_paths.bin に書く。
 
 これがあれば、アプリを動かすときに osrm-routed は要らない。
 
     docker run -d --rm -p 5050:5000 -v /var/tmp/shuden-osrm:/data \
       osrm/osrm-backend osrm-routed --algorithm mld /data/tokyo.osrm
-    python3 scripts/build_taxipaths.py          # 20 分ほど
+    python3 scripts/build_taxipaths.py          # 10 分ほど
 
-必要な組は **(降りる駅, 自宅) だけで決まり、時刻には依らない**（時刻が決めるのは
-「どの駅で降りるか」で、降りてしまえば道は同じ）。ただし**ひとつの時刻ぶんでは足りない**。
-スライダーの範囲（20:00〜翌03:00）で実際に出てくる組を数えると 23,314 通りあり、
-いちばん広くカバーできる 23:45 の表でも全体の 52.9%、22:00 の表なら 49.5% しか埋まらない。
-そこで**全時刻ぶんを列挙して全部計算する**。
+必要な組は **(駅, 起点) の組だけで決まり、時刻には依らない**。ただし**ひとつの時刻ぶんでは
+足りない**ので、全時刻ぶんを列挙して全部計算する（35,985 組）。
 
 形式（リトルエンディアン）:
 
     "TXP1"            4 バイト
     uint32 count      組の数
-    count × 12 バイト  uint16 降りる駅 / uint16 自宅 / uint32 データの位置 / uint16 点の数 / uint16 予備
+    count × 12 バイト  uint16 駅 / uint16 起点 / uint32 データの位置 / uint16 点の数 / uint16 予備
     そのあと          点の数 × 2 × int16。1e-5 度を 1 とした「ひとつ前との差」。
-                      最初の点は「降りる駅の座標」との差
+                      最初の点は「駅の座標」との差
 
-点は Douglas-Peucker で 40m まで間引く（生 584 点 → 33 点）。
+点は Douglas-Peucker で 40m まで間引く。
 """
 import http.client
 import json

@@ -4,15 +4,10 @@
 画面そのものはサーバを使わない（site/data/home/<駅>.bin を読んで自分で計算する）。
 GitHub Pages に置くのは site/ の中身だけ。
 
-  GET /                        web/index.html
+  GET /                        site/index.html
   GET /api/night?home=12&t=1420
-      自宅を 12 番の駅にして、1420 分（23:40）に飲み屋を出たときの、
-      候補 10 駅それぞれの状態を返す。
-
-状態は 2 つ。
-  train … まだ終電に間に合う。あと何分かを返す
-  taxi  … 終電が尽きた。**電車で行けるところまで行き、いちばん安く済む駅で降りて
-          タクシー**に乗ったときの運賃・降りる駅・距離を返す
+      起点を 12 番の駅、時刻を 1420 分（23:40）にしたときの、候補の駅それぞれの値。
+      scripts/verify_static.py が site/ の値と突き合わせるのに使う。
 """
 import json
 import math

@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""飲む候補の駅を選んで web/data/spots.json に書き出す。
+"""候補の駅 20 を web/data/spots.json に書き出す。
 
-**選び方を手で決めている理由**:
-OSM の飲み屋（`amenity=pub` / `bar` / `nightclub`）の件数で順位を付けると、
-大船 210 件 > 池袋 56 件 のような並びになる。OSM の整備は地域とマッパーの偏りが
-大きく、**件数は「飲み屋の多さ」ではなく「誰がどれだけ地図を描いたか」を表している**。
-そこで候補はよく知られた繁華街から手で選び、方角が散るようにした。
-飲み屋の件数は参考値として載せるだけにしてある。
+駅は下の SPOTS に手で書いてある（選び方の記録はワークスペース側）。
+中心からの方角と距離が散るように選んであり、いちばん近い組でも 3.5km 離れている。
 
 出力: web/data/spots.json
 """
@@ -18,7 +14,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 OUT = ROOT / "web" / "data"
-BARS = ROOT.parent / "nomikai-navi" / "data" / "bars_by_station.json"
 
 # 終電を逃しうる駅 20。**中心からの方角と距離が散るように**選んである。
 # 2026-10-06 に 10 → 20 へ。ユーザー「都心でふやすとごちゃごちゃになるので、
@@ -59,13 +54,6 @@ def main():
     base = json.loads((OUT / "base.json").read_text())
     nodes = base["nodes"]
 
-    bars = {}
-    try:
-        for r in json.loads(BARS.read_text()):
-            bars[r["name"]] = max(bars.get(r["name"], 0), r["bars"])
-    except FileNotFoundError:
-        print("  （飲み屋の件数は見つからなかったので 0 にする）")
-
     by_name = {}
     for i, n in enumerate(nodes):
         if n["v"] and n["n"] not in by_name:
@@ -80,7 +68,6 @@ def main():
         out.append({
             "node": i, "name": name, "dir": dirn,
             "y": nodes[i]["y"], "x": nodes[i]["x"],
-            "bars": bars.get(name, 0),
         })
 
     # どれだけ散っているかを見ておく
@@ -90,7 +77,7 @@ def main():
     )
     print("候補 %d 駅" % len(out))
     for s in out:
-        print("  %-6s %-4s 飲み屋 %4d 件（参考）" % (s["name"], s["dir"], s["bars"]))
+        print("  %-6s %s" % (s["name"], s["dir"]))
     print("いちばん近い2駅: %s—%s %.1fkm" % (worst[1], worst[2], worst[0]))
 
     OUT.mkdir(parents=True, exist_ok=True)
