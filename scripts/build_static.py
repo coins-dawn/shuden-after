@@ -274,7 +274,8 @@ def main():
     slim = lambda a: [{"node": x["node"], "name": x["name"]} for x in a]
     idx = {
         "homes": slim(HOMES),
-        "lines": [[nm, RAIL["op"].get(op_of.get(nm, ""), 0)] for nm in LINES],
+        "lines": [[nm, RAIL["odpt"].get(nm, RAIL["op"].get(op_of.get(nm, ""), 0))]
+                  for nm in LINES],
         "railways": len({li for li in NET.trip_line if li}),
         "spots": [s["node"] for s in SPOTS],
         "time": {"from": T_FROM, "to": T_TO, "step": T_STEP},

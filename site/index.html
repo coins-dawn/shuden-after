@@ -638,16 +638,20 @@
 
     drawSky();
 
-    // 海岸線・県境
+    // 海岸線・県境。**点線にする。**
+    // 夜が深まると路線も灰色に抜けるので、実線のままだと線路と見分けがつかない。
+    // 点線は地図の約束ごとで「境」を表すので、形だけで区別できる。
     if (LV) {
-      ctx.strokeStyle = 'rgba(134,150,180,' + fade(0.40, 0.11).toFixed(3) + ')';
+      ctx.strokeStyle = 'rgba(120,138,172,' + fade(0.42, 0.16).toFixed(3) + ')';
       ctx.lineWidth = 1; ctx.lineJoin = 'round';
+      ctx.setLineDash([1.6, 3.4]);
       ctx.beginPath();
       for (const [a, b] of landRange) {
         ctx.moveTo(landX[a] * view.k + view.tx, landY[a] * view.k + view.ty);
         for (let v = a + 1; v < b; v++) ctx.lineTo(landX[v] * view.k + view.tx, landY[v] * view.k + view.ty);
       }
       ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     // 路線（うっすら）。はじまりは路線の色、動かしはじめると灰色に抜け、
@@ -712,9 +716,12 @@
         };
         if (s.off !== s.node) {
           if (FRAGILE) line(halo, 5.5, [], s.trainPath, s.node, s.off);
-          line(FRAGILE ? core : (dim ? 0.10 : 0.95), dim ? 1.4 : FRAGILE ? 1.5 : 1.9,
-               FRAGILE ? DASH_TRAIN : [], s.trainPath, s.node, s.off);
-          if (!dim) placeIcon(pathPts(s.trainPath, s.node, s.off), 'train', picked === s.node);
+          if (dim) line(0.10, 1.4, DASH_TRAIN, s.trainPath, s.node, s.off);
+          else {
+            const tp = pathPts(s.trainPath, s.node, s.off);
+            drawTrack(tp, 1.35, 7, (now / 1000) * DRIFT_PX, core, 0.95);
+            placeIcon(tp, 'train', picked === s.node);
+          }
         }
         // そこから自宅までタクシー
         if (FRAGILE) line(halo * 0.85, 5.5, [], s.taxiPath, s.off, home);
@@ -735,11 +742,19 @@
     const lay = tw ? null : labelLayout();
     HITS.length = 0;
 
-    // 自宅
-    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(SX(home), SY(home), 9, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = '#ffd166';
-    ctx.beginPath(); ctx.arc(SX(home), SY(home), 3, 0, Math.PI * 2); ctx.fill();
+    // 自宅。**ここが帰り着く先**なので、ほかの印より一回り大きくする
+    {
+      const hx = SX(home), hy = SY(home);
+      const g = ctx.createRadialGradient(hx, hy, 2, hx, hy, 34);
+      g.addColorStop(0, 'rgba(255,209,102,.20)');
+      g.addColorStop(1, 'rgba(255,209,102,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(hx, hy, 34, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.arc(hx, hy, 13, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.arc(hx, hy, 4.6, 0, Math.PI * 2); ctx.fill();
+    }
     if (lay) chip(lay.home.x, lay.home.y, '自宅・' + NODES[home].n, '', '#ffd166', 0, false, false);
 
     if (data) {
@@ -899,6 +914,39 @@
         if ((o[0] - x) ** 2 + (o[1] - y) ** 2 < keep * keep) return;   // 混んだところは 1 つだけ
     }
     ICONS.push([x, y, kind, r]);
+  }
+
+  // 電車の区間は**線路の形**で引く。2 本のレールのあいだに短い枕木を並べ、
+  // 枕木を自宅のほうへ流す。タクシーの破線と、色ではなく**形**で見分けられるようにする。
+  function drawTrack(pts, w, every, phase, alpha, lw) {
+    ctx.strokeStyle = 'rgba(255,255,255,' + alpha.toFixed(3) + ')';
+    ctx.lineWidth = lw;
+    for (const side of [-1, 1]) {            // レール 2 本
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+        let nx = -(b[1] - a[1]), ny = b[0] - a[0];
+        const L = Math.hypot(nx, ny) || 1;
+        const x = pts[i][0] + nx / L * w * side, y = pts[i][1] + ny / L * w * side;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.beginPath();                          // 枕木
+    let d = every - (phase % every);
+    for (let i = 1; i < pts.length; i++) {
+      const ax = pts[i-1][0], ay = pts[i-1][1];
+      const ux = pts[i][0] - ax, uy = pts[i][1] - ay;
+      const seg = Math.hypot(ux, uy);
+      if (seg < 1e-6) continue;
+      const vx = ux / seg, vy = uy / seg, nx = -vy * w * 1.3, ny = vx * w * 1.3;
+      for (let t = d; t < seg; t += every) {
+        const x = ax + vx * t, y = ay + vy * t;
+        ctx.moveTo(x - nx, y - ny); ctx.lineTo(x + nx, y + ny);
+      }
+      d = (d - seg) % every; if (d < 0) d += every;
+    }
+    ctx.stroke();
   }
 
   function drawIcons() {
