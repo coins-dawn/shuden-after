@@ -195,7 +195,7 @@ python3 scripts/build_taxipaths.py
 
 数字を地図に戻すときは `site/index.html` の `MAP_FARE` を `true` に（色の目盛りも消える）。
 
-### 実験: 帰り道を「はかない」線にする（枝 `exp-fragile-route`）
+### 帰り道は「はかない」線で引く
 
 **今にも消えそうな線にしたいが、薄くすると見えなくなる。** そこで**2 枚重ねる**。
 
@@ -209,8 +209,7 @@ python3 scripts/build_taxipaths.py
 - 電車は `[17, 3.5]`（ほぼ実線のまま、ところどころ切れる）、
   タクシーは `[5, 4.5]`。**実線／破線の描き分けは保ったまま**
 
-**戻し方**: `site/index.html` の `FRAGILE` を `false` に（元の実線／破線に戻る）。
-枝ごと捨てるなら `git checkout master`。
+元の実線／破線に戻すときは `site/index.html` の `FRAGILE` を `false` に。
 
 ⚠ **毎フレーム描くと 8fps まで落ちた**（画面いっぱいの放射グラデと海岸線・路線を
 描き直していた）。→ **背景・空・海岸線・路線・駅を下敷きのキャンバスに焼いて、
