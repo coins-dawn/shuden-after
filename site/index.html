@@ -44,8 +44,8 @@
   .logo:hover .moon { filter: drop-shadow(0 0 5px rgba(255,217,160,.55)); }
   .head p { margin: 7px 0 0; font-size: 12px; color: var(--sub); letter-spacing: .06em; }
   /* 一覧（終電のあとの帰り方）の上。右上に置く */
-  .about { position: absolute; top: 52px; right: 20px; z-index: 3;
-    font: inherit; font-size: 11px; letter-spacing: .04em;
+  .acts { position: absolute; top: 52px; right: 20px; z-index: 3; display: flex; gap: 8px; }
+  .about { font: inherit; font-size: 11px; letter-spacing: .04em;
     padding: 4px 11px; cursor: pointer; color: var(--sub); white-space: nowrap;
     background: var(--panel); border: 1px solid var(--line); border-radius: 999px; }
   .about:hover { color: var(--ink); border-color: rgba(238,241,246,.34); }
@@ -161,6 +161,24 @@
   .foot { position: absolute; bottom: 0; left: 0; right: 0; padding: 8px 20px; z-index: 3;
     font-size: 11px; color: var(--sub); line-height: 1.5; }
   .foot a { color: #93a0b4; }
+  /* デモの字幕と、注目させる枠 */
+  .cap { position: absolute; left: 50%; bottom: 54px; transform: translateX(-50%); z-index: 6;
+    width: min(760px, calc(100vw - 48px)); padding: 14px 22px; text-align: center;
+    background: rgba(8, 11, 17, .93); border: 1px solid rgba(238,241,246,.18);
+    border-radius: 8px; font-size: 17px; line-height: 1.65; letter-spacing: .02em;
+    opacity: 0; transition: opacity .35s; pointer-events: none; }
+  .cap.on { opacity: 1; }
+  body.demo .back { display: none !important; }
+  .cap b { color: var(--home); font-weight: 600; }
+  .hi { position: absolute; z-index: 5; display: none; pointer-events: none;
+    border: 2px solid rgba(255,209,102,.9); border-radius: 10px;
+    box-shadow: 0 0 20px rgba(255,209,102,.45), inset 0 0 20px rgba(255,209,102,.14);
+    animation: hipulse 1.4s ease-in-out infinite; }
+  @keyframes hipulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+  @media (max-width: 820px) {
+    .cap { font-size: 14px; padding: 10px 14px; bottom: 44px; }
+  }
+
   .toast { position: absolute; z-index: 4; pointer-events: none; top: 24px;
     left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity .5s;
     background: var(--panel); border: 1px solid rgba(255,107,122,.45); border-radius: 3px;
@@ -187,7 +205,7 @@
     .hint { display: none; }
     .foot { padding: 6px 12px; font-size: 9.5px; line-height: 1.45; }
     .foot .wide { display: none; }
-    .about { top: 13px; right: 12px; }
+    .acts { top: 13px; right: 12px; }
     .sheet-in { padding: 18px 16px 20px; font-size: 12px; }
   }
 </style>
@@ -208,7 +226,10 @@
   </button>
   <p>終電を逃したら、どこにいたかで帰り方が変わる。</p>
 </div>
-<button class="about" id="about-btn">このサービスについて</button>
+<div class="acts">
+  <button class="about" id="demo-btn">デモを見る</button>
+  <button class="about" id="about-btn">このサービスについて</button>
+</div>
 
 <div class="panel">
   <div class="row">
@@ -286,6 +307,9 @@
       静的データ取得日: 2026-09-28</p>
   </div>
 </div>
+
+<div class="cap" id="cap"></div>
+<div class="hi" id="hi"></div>
 
 <div class="toast" id="toast"></div>
 <div class="foot" id="foot"></div>
@@ -1054,9 +1078,10 @@
     if (wallsCache) return wallsCache;
     const walls = [];
     // '.back' は選んでいるときと地図を動かしたときだけ出る。出ている間は避ける
-    for (const sel of ['.head', '.panel', '.list', '.foot', '.back']) {
+    for (const sel of ['.head', '.panel', '.list', '.foot', '.back', '.cap']) {
       const el = document.querySelector(sel);
       if (!el || getComputedStyle(el).display === 'none') continue;
+      if (sel === '.cap' && !el.classList.contains('on')) continue;
       const r = el.getBoundingClientRect();
       // 一覧は中身で高さが変わるので、下は画面下に固定して扱う。
       // 残りも 20px に丸める。中身が少し変わるたびに札が組み直されないように
@@ -1450,23 +1475,20 @@
     return { home, homeName: NODES[home].n, t: t, spots: out };
   }
 
-  // スライダーの範囲は自宅ごとに決める。
-  // **最初の終電の 20 分前 〜 最後の終電の 20 分後。** それより前も後も、見ていても何も起きない。
-  // 前は 20 分取っていたが、再生を遅くした（1 分 0.44 秒）ぶん、入りが長く感じる。
-  // 頭は 15 分（＝約 6.6 秒）、終わったあとは 20 分。
-  const HEAD = 15, TAIL = 20;
+  // スライダーの範囲。**左端はいつも 22:30**（自宅を変えても動かないほうが分かりやすい）。
+  // 右端は最後の終電の 20 分後。そこから先は見ていても何も起きない。
+  const T_LEFT = 22 * 60 + 30, TAIL = 20;
   function setRange(H) {
     const last = H.tFrom + (H.nt - 1) * H.tStep;
-    let lo = null, hi = null;
+    let hi = null;
     for (let i = 0; i < H.ns; i++) {
       const v = H.limit[i];
       if (v < 0 || SPOTS[i].node === home) continue;
-      if (lo === null || v < lo) lo = v;
       if (hi === null || v > hi) hi = v;
     }
-    tFrom = lo === null ? H.tFrom : Math.max(H.tFrom, lo - HEAD);
+    tFrom = Math.max(H.tFrom, T_LEFT);
     if (skyT === null) skyT = tFrom;        // 空はここで決めて、あとは動かさない
-    tTo   = hi === null ? last    : Math.min(last, hi + TAIL);
+    tTo = hi === null ? last : Math.min(last, hi + TAIL);
     timeEl.min = tFrom; timeEl.max = tTo;
     tEnds[0].textContent = fmt2(tFrom);
     tEnds[1].textContent = fmt2(tTo);
@@ -1733,6 +1755,9 @@
     return best;
   }
   let drag = null;
+  cv.addEventListener('pointerdown', () => { if (demoOn) endDemo(); });
+  document.querySelector('.panel').addEventListener('pointerdown', () => { if (demoOn) endDemo(); });
+  document.querySelector('.list').addEventListener('pointerdown', () => { if (demoOn) endDemo(); });
   cv.addEventListener('pointerdown', e => {
     drag = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty, moved: false };
     cv.setPointerCapture(e.pointerId);
@@ -1803,6 +1828,108 @@
     + '<span class="wide">　データの正確性は保証されません'
     + '／交通事業者へのお問い合わせはご遠慮ください</span>'
     + '　— くわしくは「このサービスについて」';
+
+  // ---- デモ ----
+  // 2 分ほどで、概要 → 初期画面の説明 → シミュレーションの順に回す。
+  // 字幕は地図の下、注目させたいところは枠で囲む。**機能の説明だけにする**
+  // （演出の自慢を字幕で言うと、演出そのものが台無しになる）。
+  const cap = document.getElementById('cap'), hi = document.getElementById('hi');
+  const demoBtn = document.getElementById('demo-btn');
+  let demoOn = false, demoTimer = null, demoWake = null;
+
+  const sleep = ms => new Promise(res => {
+    demoWake = res; demoTimer = setTimeout(res, ms);
+  });
+  function say(html) { cap.innerHTML = html; cap.classList.add('on'); dirtyWalls(); }
+  function hideCap() { cap.classList.remove('on'); dirtyWalls(); }
+  function spotEl(sel, pad) {
+    const el = document.querySelector(sel);
+    if (!el) return spotOff();
+    const r = el.getBoundingClientRect(), q = pad == null ? 8 : pad;
+    hi.style.display = 'block';
+    hi.style.left = (r.left - q) + 'px'; hi.style.top = (r.top - q) + 'px';
+    hi.style.width = (r.width + q * 2) + 'px'; hi.style.height = (r.height + q * 2) + 'px';
+    hi.style.borderRadius = '10px';
+  }
+  function spotMap(x, y, r) {
+    hi.style.display = 'block';
+    hi.style.left = (x - r) + 'px'; hi.style.top = (y - r) + 'px';
+    hi.style.width = hi.style.height = (r * 2) + 'px';
+    hi.style.borderRadius = '50%';
+  }
+  const spotOff = () => { hi.style.display = 'none'; };
+
+  async function step(ms, html, mark) {
+    if (!demoOn) return false;
+    say(html);
+    mark ? mark() : spotOff();
+    await sleep(ms);
+    return demoOn;
+  }
+
+  async function runDemo() {
+    demoOn = true;
+    demoBtn.textContent = 'デモを終わる';
+    document.body.classList.add('demo');
+    // はじまりの形にそろえる
+    setPlaying(false); clearPicked();
+    if (home !== INDEX.homes[0].node) setHome(INDEX.homes[0].node);
+    t0 = tFrom; timeEl.value = t0; setClock(t0); setNight(t0);
+    await load();
+    if (!demoOn) return;
+
+    // 1) サービスの概要
+    if (!await step(7000, '終電を逃したとき、<b>そのときどこにいたか</b>で帰り方がどれだけ変わるかを見る地図です。')) return;
+    if (!await step(8000, '首都圏の <b>20 駅</b>について、終電までの残り時間と、終電のあとは「電車で行けるところまで行って、そこからタクシーに乗ったときの運賃」を出します。')) return;
+    if (!await step(7000, '使っているのは、公共交通オープンデータセンターの<b>列車時刻表</b>（平日ダイヤ・鉄道 10 事業者 64 路線）です。')) return;
+
+    // 2) 初期画面
+    if (!await step(7000, '自宅の最寄り駅をここで選びます。<b>10 駅</b>から選べて、選び直すと数字が全部入れ替わります。',
+        () => spotEl('.panel .row:first-child'))) return;
+    if (!await step(8000, '時刻はここ。スライダーは <b>22:30</b> から、<b>最後の終電の 20 分後</b>までです。',
+        () => spotEl('.timecard'))) return;
+    if (!await step(8000, '地図の丸が、その 20 駅です。<b>緑</b>はまだ終電に間に合う、<b>黄色</b>はまもなく、<b>赤</b>は終電が行ったあと。',
+        () => { const sp = SPOTS.find(x => x.name === '新宿'); spotMap(SX(sp.node), SY(sp.node), 52); })) return;
+    if (!await step(7000, '右の一覧は、同じ内容を表にしたものです。残り時間の短い順、終電後は運賃の安い順に並びます。',
+        () => spotEl('.list', 6))) return;
+
+    // 3) シミュレーション
+    spotEl('#play', 6);
+    say('「スタート」を押すと時刻が進みます。終電が行った駅から順に、<b>緑から赤へ</b>変わります。');
+    setPlaying(true);
+    await sleep(9000); if (!demoOn) return;
+    if (!await step(9000, '路線の色は、時間とともに<b>灰色</b>に抜けていきます。終電のあとの帰り道を見やすくするためです。')) return;
+    if (!await step(9000, '赤い点のまわりの<b>滲みの大きさと濃さがタクシー代</b>です。淡いほど安く、濃いほど高くつきます。')) return;
+    if (!await step(8000, '同じ時刻でも、どの駅にいたかで運賃は何倍も違います。')) return;
+
+    // 1 駅に寄る
+    setPlaying(false);
+    const pick = SPOTS.find(x => x.name === '横浜');
+    t0 = Math.min(tTo, 1445); timeEl.value = t0; setClock(t0); setNight(t0);
+    await load(); if (!demoOn) return;
+    setPicked(pick.node);
+    spotOff();
+    say('ひとつ選ぶと、その帰り方だけが残ります。<b>白い線路が電車</b>、<b>白い破線がタクシー</b>の区間です。');
+    await sleep(10000); if (!demoOn) return;
+    if (!await step(10000, '右の一覧には、<b>何時にどの路線に乗って、どこで乗り換えるか</b>が出ます。',
+        () => spotEl('.item.sel', 4))) return;
+
+    clearPicked();
+    if (!await step(8000, '自宅を変えると、終電の時刻も、帰り方も、運賃も変わります。<b>痛みは距離ではなく、終電の残り方で決まります。</b>')) return;
+    await step(5000, 'デモはここまでです。自由に動かしてみてください。');
+    endDemo();
+  }
+
+  function endDemo() {
+    demoOn = false;
+    clearTimeout(demoTimer);
+    if (demoWake) { demoWake(); demoWake = null; }
+    hideCap(); spotOff();
+    demoBtn.textContent = 'デモを見る';
+    document.body.classList.remove('demo');
+    setPlaying(false);
+  }
+  demoBtn.onclick = () => { demoOn ? endDemo() : runDemo(); };
 
   layout();
   cv.style.cursor = 'grab';
