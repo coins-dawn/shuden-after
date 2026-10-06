@@ -641,7 +641,7 @@
     // 海岸線・県境。**点線にする。**
     // 夜が深まると路線も灰色に抜けるので、実線のままだと線路と見分けがつかない。
     // 点線は地図の約束ごとで「境」を表すので、形だけで区別できる。
-    if (LV) {
+    if (LV && LAND_LINES) {
       ctx.strokeStyle = 'rgba(120,138,172,' + fade(0.42, 0.16).toFixed(3) + ')';
       ctx.lineWidth = 1; ctx.lineJoin = 'round';
       ctx.setLineDash([1.6, 3.4]);
@@ -867,6 +867,7 @@
   // さらに**ゆっくり明滅**させる。位相は駅ごとにずらす（一斉に光ると機械的になる）。
   // **元の実線／破線に戻すときは FRAGILE を false に。**
   const FRAGILE = true;
+  const LAND_LINES = true;     // 海岸線・県境を敷くか（切り替え用）
   const BREATH_MS = 1700;      // 明滅の速さ（sin の周期の目安）
   const DRIFT_PX = 15;         // 芯が流れる速さ（px/秒）。流れる向きは自宅へ
   const DASH_TRAIN = [17, 3.5], DASH_TAXI = [5, 4.5];
