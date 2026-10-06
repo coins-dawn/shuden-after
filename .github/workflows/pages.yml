@@ -23,6 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true      # Pages がまだ有効でなければ、ここで有効にする
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

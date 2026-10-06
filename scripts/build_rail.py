@@ -13,7 +13,7 @@ N02 は国土数値情報利用約款で再配布できる（海岸線の N03 �
 **置き換えるのは「配る地図」だけ。**
 
 出力: web/data/rail.json
-    {"st": {"<ノード id>": [緯度, 経度, "駅名", 路線数]},     N02 と突き合わせた駅
+    {"st": {"<ノード id>": [緯度, 経度, "駅名（N02 のもの）", 路線数]},  突き合わせた駅
      "li": [[色番号, 緯度, 経度, 緯度, 経度, ...], ...],      路線の線（折れ線）
      "co": ["#rrggbb", ...],                                  色（**自前の配色**）
      "op": {"JR-East": 0, ...}}                               事業者 → 色番号
@@ -121,13 +121,13 @@ def main():
         lat = sum(c[1] for c in cs) / len(cs)
         if not (BBOX[0] <= lon <= BBOX[2] and BBOX[1] <= lat <= BBOX[3]):
             continue
-        key = (norm(p["N02_005"]), p["N02_004"], p["N02_003"])
+        key = (norm(p["N02_005"]), p["N02_004"], p["N02_003"], p["N02_005"])
         st.setdefault(key, []).append((lat, lon))
     by_name = {}
-    for (nm, op, li), pts in st.items():
+    for (nm, op, li, raw), pts in st.items():
         la = sum(q[0] for q in pts) / len(pts)
         lo = sum(q[1] for q in pts) / len(pts)
-        by_name.setdefault(nm, []).append((la, lo, op, li))
+        by_name.setdefault(nm, []).append((la, lo, op, li, raw))
     print("N02 の駅（範囲内）: 名前 %d 種 / のべ %d 件"
           % (len(by_name), sum(len(v) for v in by_name.values())))
 
@@ -137,16 +137,17 @@ def main():
         if not nd.get("v"):
             continue
         cands = by_name.get(norm(nd["n"]), [])
-        best, bd = None, 1e9
-        for la, lo, op, li in cands:
+        best, bd, bname = None, 1e9, None
+        for la, lo, op, li, raw in cands:
             d = km((la, lo), (nd["y"], nd["x"]))
             if d < bd:
-                bd, best = d, (la, lo)
+                bd, best, bname = d, (la, lo), raw
         if best is None or bd > MAX_MATCH_KM:
             miss.append((nd["n"], round(bd, 1) if best else None))
             continue
-        lines = len({(op, li) for la, lo, op, li in cands if km((la, lo), best) < 1.2})
-        out_st[i] = [round(best[0], 5), round(best[1], 5), nd["n"], lines]
+        lines = len({(op, li) for la, lo, op, li, raw in cands if km((la, lo), best) < 1.2})
+        # **名前も N02 のものを使う**（ODPT の駅名は公開物に出さない）
+        out_st[i] = [round(best[0], 5), round(best[1], 5), bname, lines]
     vis = sum(1 for nd in nodes if nd.get("v"))
     print("突き合わせ: %d / %d 駅（%.1f%%）" % (len(out_st), vis, 100.0 * len(out_st) / vis))
     if miss:
