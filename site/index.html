@@ -170,6 +170,11 @@
     opacity: 0; transition: opacity .35s; pointer-events: none; }
   .cap span { flex: 1 1 auto; text-align: center; }
   .cap svg { flex: none; }
+  /* 字幕そのものは地図の邪魔をしないが、前後のボタンだけは押せるようにする */
+  .cap .nav { pointer-events: auto; flex: none; width: 32px; height: 32px; cursor: pointer;
+    font: inherit; font-size: 11px; color: var(--sub); border-radius: 7px;
+    background: rgba(238,241,246,.07); border: 1px solid var(--line); }
+  .cap .nav:hover { color: var(--ink); border-color: rgba(238,241,246,.34); }
   .cap.on { opacity: 1; }
   body.demo .back { display: none !important; }
   .cap b { color: var(--home); font-weight: 600; }
@@ -312,7 +317,9 @@
 </div>
 
 <div class="cap" id="cap">
+  <button class="nav" id="cap-prev" title="ひとつ前へ">◀</button>
   <span id="cap-t"></span>
+  <button class="nav" id="cap-next" title="つぎへ">▶</button>
   <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
     <circle cx="12" cy="12" r="9" fill="none" stroke="rgba(238,241,246,.16)" stroke-width="2.6"/>
     <circle id="cap-r" cx="12" cy="12" r="9" fill="none" stroke="#ffd166" stroke-width="2.6"
@@ -1542,6 +1549,8 @@
   let prevStates = null, prevT = null;
   const toastEl = document.getElementById('toast');
   let toastTimer = null, toastNames = [], toastFrom = 0;
+  // デモで説明しているあいだは、知らせを出しっぱなしにする（2.6 秒では読めない）
+  let toastPin = false;
 
   function catchLastTrains(next) {
     const now = new Map(next.spots.map(s => [s.node, s.state]));
@@ -1561,7 +1570,7 @@
     toastEl.innerHTML = '<b>' + toastNames.join('・') + '</b> の終電が、いま行きました。';
     toastEl.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+    if (!toastPin) toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
   }
 
   function render() { renderList(); }
@@ -1826,8 +1835,14 @@
   document.getElementById('about-lines').textContent = INDEX.railways;
 
   window.addEventListener('keydown', e => {
+    if (demoOn && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      goStep(stepAt + (e.key === 'ArrowRight' ? 1 : -1));
+      return;
+    }
     if (e.key !== 'Escape') return;
-    if (!sheet.hidden) openAbout(false); else clearPicked();
+    if (!sheet.hidden) openAbout(false);
+    else if (demoOn) endDemo();
+    else clearPicked();
   });
 
   // 画面に出したままにするのはこの 1 行（開発者ガイドライン 3.1 / 2.2.1）。
@@ -1845,15 +1860,13 @@
   // 2 分ほどで、概要 → 初期画面の説明 → シミュレーションの順に回す。
   // 字幕は地図の下、注目させたいところは枠で囲む。**機能の説明だけにする**
   // （演出の自慢を字幕で言うと、演出そのものが台無しになる）。
+  // 段を配列で持ち、前後に動かせるようにしてある。**各段は自分で画面を整える**ので、
+  // どの順に飛んでも中身と絵が食い違わない。
   const cap = document.getElementById('cap'), hi = document.getElementById('hi');
   const capT = document.getElementById('cap-t'), capR = document.getElementById('cap-r');
   const demoBtn = document.getElementById('demo-btn');
-  let demoOn = false, demoTimer = null, demoWake = null;
+  let demoOn = false, demoTimer = null, stepAt = -1;
 
-  const sleep = ms => new Promise(res => {
-    demoWake = res; demoTimer = setTimeout(res, ms);
-  });
-  // 字幕と、次までの残りを表す輪。輪は CSS の遷移で 1 周ぶん減らすだけ
   function say(html, ms) {
     capT.innerHTML = html;
     cap.classList.add('on');
@@ -1864,7 +1877,6 @@
     capR.style.strokeDashoffset = '56.5';
     dirtyWalls();
   }
-  function hideCap() { cap.classList.remove('on'); dirtyWalls(); }
   function spotEl(sel, pad) {
     const el = document.querySelector(sel);
     if (!el) return spotOff();
@@ -1881,93 +1893,101 @@
     hi.style.borderRadius = '50%';
   }
   const spotOff = () => { hi.style.display = 'none'; };
+  const unpin = () => { toastPin = false; toastEl.classList.remove('show'); };
 
-  async function step(ms, html, mark) {
-    if (!demoOn) return false;
-    say(html, ms);
-    mark ? mark() : spotOff();
-    await sleep(ms);
-    return demoOn;
+  // 時刻を動かす（load を待つ）
+  async function goTime(t) {
+    t0 = Math.max(tFrom, Math.min(tTo, t));
+    timeEl.value = t0; setClock(t0); setNight(t0);
+    await load();
   }
+  // 次に終電が行く瞬間まで進めて、知らせを出す（どの順に飛んでも出るように）
+  async function makeToast() {
+    if (toastEl.classList.contains('show')) return;
+    let nx = null;
+    if (data) for (const x of data.spots)
+      if (x.limit != null && x.limit >= t0 && (nx === null || x.limit < nx)) nx = x.limit;
+    if (nx === null) return;
+    await goTime(nx - 1);
+    await goTime(nx + 1);                 // ここで「いま行きました」が出る
+  }
+  const resume = () => { if (!playing) setPlaying(true); };
+  const pause = () => { setPlaying(false); clearPicked(); };
 
-  // 「いま行きました」が出るまで待つ（出なければ待ち切りで進む）
-  async function waitToast(maxMs) {
-    const until = performance.now() + maxMs;
-    while (demoOn && performance.now() < until) {
-      if (toastEl.classList.contains('show')) return true;
-      await sleep(200);
-    }
-    return false;
+  const STEPS = [
+    { ms: 7000, setup: pause,
+      html: '終電を逃したとき、<b>そのときどこにいたか</b>で帰り方がどれだけ変わるかを見る地図です。' },
+    { ms: 8000, setup: pause,
+      html: '首都圏の <b>20 駅</b>について、終電までの残り時間と、終電のあとは「電車で行けるところまで行って、そこからタクシーに乗ったときの運賃」を出します。' },
+    { ms: 7000, setup: pause,
+      html: '使っているのは、公共交通オープンデータセンターの<b>列車時刻表</b>（平日ダイヤ・鉄道 10 事業者 64 路線）です。' },
+    { ms: 7000, setup: pause, mark: () => spotEl('.panel .row:first-child'),
+      html: '自宅の最寄り駅をここで選びます。<b>10 駅</b>から選べて、選び直すと数字が全部入れ替わります。' },
+    { ms: 8000, setup: pause, mark: () => spotEl('.timecard'),
+      html: '時刻はここ。スライダーは <b>22:30</b> から、<b>最後の終電の 20 分後</b>までです。' },
+    { ms: 8000, setup: pause,
+      mark: () => { const sp = SPOTS.find(x => x.name === '新宿'); spotMap(SX(sp.node), SY(sp.node), 52); },
+      html: '地図の丸が、その 20 駅です。<b>緑</b>はまだ終電に間に合う、<b>黄色</b>はまもなく、<b>赤</b>は終電が行ったあと。' },
+    { ms: 7000, setup: pause, mark: () => spotEl('.list', 6),
+      html: '右の一覧は、同じ内容を表にしたものです。残り時間の短い順、終電後は運賃の安い順に並びます。' },
+    { ms: 9000, setup: () => { clearPicked(); resume(); }, mark: () => spotEl('#play', 6),
+      html: '「スタート」を押すと時刻が進みます。終電が行った駅から順に、<b>緑から赤へ</b>変わります。' },
+    { ms: 9000, setup: () => { clearPicked(); resume(); },
+      html: '路線の色は、時間とともに<b>灰色</b>に抜けていきます。終電のあとの帰り道を見やすくするためです。' },
+    { ms: 8000, setup: () => { clearPicked(); resume(); },
+      html: '赤い点のまわりの<b>滲みの大きさと濃さがタクシー代</b>です。淡いほど安く、濃いほど高くつきます。' },
+    { ms: 9000, mark: () => spotEl('.toast', 6),
+      setup: async () => { clearPicked(); resume(); toastPin = true; clearTimeout(toastTimer); await makeToast(); },
+      html: '終電が行った駅は、上に<b>「いま行きました」</b>と出ます。地図では、その駅から輪が広がって消えます。' },
+    { ms: 10000, setup: () => { resume(); setPicked(SPOTS.find(x => x.name === '横浜').node); },
+      html: 'ひとつ選ぶと、その帰り方だけが残ります。<b>白い線路が電車</b>、<b>白い破線がタクシー</b>の区間です。時刻はそのまま進みます。' },
+    { ms: 10000, mark: () => spotEl('.item.sel', 4),
+      setup: () => { resume(); setPicked(SPOTS.find(x => x.name === '横浜').node); },
+      html: '右の一覧には、<b>何時にどの路線に乗って、どこで乗り換えるか</b>が出ます。' },
+    { ms: 8000, setup: pause,
+      html: '自宅を変えると、終電の時刻も、帰り方も、運賃も変わります。<b>痛みは距離ではなく、終電の残り方で決まります。</b>' },
+    { ms: 5000, setup: pause,
+      html: 'デモはここまでです。<b>◀ ▶</b> で行き来できます。自由に動かしてみてください。' },
+  ];
+
+  function goStep(i) {
+    if (!demoOn) return;
+    if (i >= STEPS.length) return endDemo();
+    stepAt = Math.max(0, i);
+    const st = STEPS[stepAt], mine = stepAt;
+    clearTimeout(demoTimer);
+    spotOff(); unpin();
+    Promise.resolve(st.setup ? st.setup() : null).then(() => {
+      if (!demoOn || stepAt !== mine) return;
+      say(st.html, st.ms);
+      if (st.mark) st.mark();
+      demoTimer = setTimeout(() => goStep(mine + 1), st.ms);
+    });
   }
 
   async function runDemo() {
     demoOn = true;
     demoBtn.textContent = 'デモを終わる';
     document.body.classList.add('demo');
-    // はじまりの形にそろえる
     setPlaying(false); clearPicked();
     if (home !== INDEX.homes[0].node) setHome(INDEX.homes[0].node);
-    t0 = tFrom; timeEl.value = t0; setClock(t0); setNight(t0);
-    await load();
-    if (!demoOn) return;
-
-    // 1) サービスの概要
-    if (!await step(7000, '終電を逃したとき、<b>そのときどこにいたか</b>で帰り方がどれだけ変わるかを見る地図です。')) return;
-    if (!await step(8000, '首都圏の <b>20 駅</b>について、終電までの残り時間と、終電のあとは「電車で行けるところまで行って、そこからタクシーに乗ったときの運賃」を出します。')) return;
-    if (!await step(7000, '使っているのは、公共交通オープンデータセンターの<b>列車時刻表</b>（平日ダイヤ・鉄道 10 事業者 64 路線）です。')) return;
-
-    // 2) 初期画面
-    if (!await step(7000, '自宅の最寄り駅をここで選びます。<b>10 駅</b>から選べて、選び直すと数字が全部入れ替わります。',
-        () => spotEl('.panel .row:first-child'))) return;
-    if (!await step(8000, '時刻はここ。スライダーは <b>22:30</b> から、<b>最後の終電の 20 分後</b>までです。',
-        () => spotEl('.timecard'))) return;
-    if (!await step(8000, '地図の丸が、その 20 駅です。<b>緑</b>はまだ終電に間に合う、<b>黄色</b>はまもなく、<b>赤</b>は終電が行ったあと。',
-        () => { const sp = SPOTS.find(x => x.name === '新宿'); spotMap(SX(sp.node), SY(sp.node), 52); })) return;
-    if (!await step(7000, '右の一覧は、同じ内容を表にしたものです。残り時間の短い順、終電後は運賃の安い順に並びます。',
-        () => spotEl('.list', 6))) return;
-
-    // 3) シミュレーション
-    spotEl('#play', 6);
-    say('「スタート」を押すと時刻が進みます。終電が行った駅から順に、<b>緑から赤へ</b>変わります。', 9000);
-    setPlaying(true);
-    await sleep(9000); if (!demoOn) return;
-    if (!await step(9000, '路線の色は、時間とともに<b>灰色</b>に抜けていきます。終電のあとの帰り道を見やすくするためです。')) return;
-    if (!await step(8000, '赤い点のまわりの<b>滲みの大きさと濃さがタクシー代</b>です。淡いほど安く、濃いほど高くつきます。')) return;
-
-    // 終電が行った瞬間の知らせ。実際に出るまで待ってから説明する
-    await waitToast(12000); if (!demoOn) return;
-    say('終電が行った駅は、上に<b>「いま行きました」</b>と出ます。地図では、その駅から輪が広がって消えます。', 7500);
-    spotEl('.toast', 6);
-    await sleep(2600); if (!demoOn) return;
-    spotOff();
-    await sleep(4900); if (!demoOn) return;
-
-    // 1 駅に寄る。**時刻は止めない**
-    const pick = SPOTS.find(x => x.name === '横浜');
-    setPicked(pick.node);
-    spotOff();
-    say('ひとつ選ぶと、その帰り方だけが残ります。<b>白い線路が電車</b>、<b>白い破線がタクシー</b>の区間です。時刻はそのまま進みます。', 10000);
-    await sleep(10000); if (!demoOn) return;
-    if (!await step(10000, '右の一覧には、<b>何時にどの路線に乗って、どこで乗り換えるか</b>が出ます。',
-        () => spotEl('.item.sel', 4))) return;
-
-    setPlaying(false);
-    clearPicked();
-    if (!await step(8000, '自宅を変えると、終電の時刻も、帰り方も、運賃も変わります。<b>痛みは距離ではなく、終電の残り方で決まります。</b>')) return;
-    await step(5000, 'デモはここまでです。自由に動かしてみてください。');
-    endDemo();
+    await goTime(tFrom);
+    if (demoOn) goStep(0);
   }
 
   function endDemo() {
     demoOn = false;
     clearTimeout(demoTimer);
-    if (demoWake) { demoWake(); demoWake = null; }
-    hideCap(); spotOff();
+    unpin(); spotOff();
+    cap.classList.remove('on');
+    dirtyWalls();
     demoBtn.textContent = 'デモを見る';
     document.body.classList.remove('demo');
     setPlaying(false);
   }
   demoBtn.onclick = () => { demoOn ? endDemo() : runDemo(); };
+  document.getElementById('cap-prev').onclick = () => goStep(stepAt - 1);
+  document.getElementById('cap-next').onclick = () => goStep(stepAt + 1);
 
   layout();
   cv.style.cursor = 'grab';
