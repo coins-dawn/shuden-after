@@ -263,7 +263,13 @@
 <script>
 (async function () {
   const cv = document.getElementById('c');
-  const ctx = cv.getContext('2d');
+  // 下敷き（背景・空・海岸線・路線・駅）は**変わったときだけ**別のキャンバスに描いて、
+  // 毎フレームはそれを 1 枚貼るだけにする。帰り道をゆらすと毎フレーム描くことになり、
+  // 全部描き直していると 8fps まで落ちた（画面いっぱいの放射グラデが重い）。
+  // 描く先を差し替えるので ctx は let。
+  let ctx = cv.getContext('2d');
+  const baseCv = document.createElement('canvas');
+  const baseCtx = baseCv.getContext('2d');
   const base = await (await fetch('data/base.json')).json();
   const land = await fetch('data/land.json').then(r => r.ok ? r.json() : null).catch(() => null);
   // 夜空（実際の星と星座線）。無くても動く
@@ -526,7 +532,7 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawSky(now) {
+  function drawSky() {
     if (nn <= 0.01) return;
     buildSky();
     // 星座線は、夜が深くなってからうっすらと
@@ -549,7 +555,6 @@
       ctx.beginPath(); ctx.arc(st[0], st[1], st[2], 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
-    drawMeteor(now);
   }
 
   const bgRGB = () => DUSK.map((v, i) => mixCh(v, DEEP[i], nn));
@@ -566,8 +571,29 @@
   }
 
   // ---- 描画 ----
-  // 奥から: 背景 → ふちの暈し → 空（星・月）→ 海岸線 → 路線 → 駅 → 走っている電車 → 帰り道 → 札
+  // 奥から: 背景 → ふちの暈し → 空（星）→ 海岸線 → 路線 → 駅 ＝ ここまでが下敷き。
+  // そのうえに 流れ星 → 帰り道 → 乗り物の印 → 札 を毎フレーム描く。
+  let baseKey = '';
+  function drawBase() {
+    const key = [W, H, dpr, view.k.toFixed(4), Math.round(view.tx), Math.round(view.ty),
+                 nn.toFixed(3), deadness().toFixed(3), grayness().toFixed(3), skyKey].join('|');
+    if (key === baseKey) return;
+    baseKey = key;
+    if (baseCv.width !== W * dpr) { baseCv.width = W * dpr; baseCv.height = H * dpr; }
+    baseCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const real = ctx;
+    ctx = baseCtx;            // 下敷きに描かせる（描く手続きは共通）
+    try { paintBase(); } finally { ctx = real; }
+  }
+
   function draw(now) {
+    drawBase();
+    ctx.drawImage(baseCv, 0, 0, W, H);
+    drawMeteor(now);
+    drawOver(now);
+  }
+
+  function paintBase() {
     ctx.fillStyle = bgCss();
     ctx.fillRect(0, 0, W, H);
 
@@ -582,7 +608,7 @@
       ctx.fillRect(0, 0, W, H);
     }
 
-    drawSky(now);
+    drawSky();
 
     // 海岸線・県境
     if (LV) {
@@ -627,6 +653,9 @@
       ctx.beginPath(); ctx.arc(SX(i), SY(i), NODES[i].w > 2 ? 1.6 : 1.0, 0, Math.PI * 2); ctx.fill();
     }
 
+  }
+
+  function drawOver(now) {
     // 帰り道（電車の区間＋タクシーの区間）
     ICONS.length = 0;
     if (data) {
@@ -641,19 +670,31 @@
         // 御徒町 → 南浦和 を一緒に通るので、そこだけ白い実線が浮かび上がっていた。
         if (dim && picked >= 0) continue;
         // 帰り道は**白**。路線が灰色に抜けたあとの画面でいちばん強い色になる。
-        // 電車は実線、タクシーは破線。太さで区別しない（細いまま読める）
+        // 電車は（ほぼ）実線、タクシーは破線。太さで区別しない（細いまま読める）。
+        // FRAGILE のときは「連続のハロー＋流れる細い芯＋明滅」の 2 枚重ね
+        const ph = (s.node % 11) * 0.57;
+        const br = FRAGILE ? 0.5 + 0.5 * Math.sin(now / BREATH_MS + ph) : 1;
+        const drift = FRAGILE ? -(now / 1000) * DRIFT_PX : 0;
+        const halo = (dim ? 0.030 : 0.075) + (dim ? 0.02 : 0.10) * br;
+        const core = (dim ? 0.07 : 0.72) + (dim ? 0.03 : 0.26) * br;
+        const line = (a, w, dash, path, p0, p1) => {
+          ctx.setLineDash(dash);
+          ctx.lineDashOffset = dash.length ? drift : 0;
+          ctx.strokeStyle = 'rgba(255,255,255,' + a.toFixed(3) + ')';
+          ctx.lineWidth = w;
+          trace(path, p0, p1);
+          ctx.setLineDash([]); ctx.lineDashOffset = 0;
+        };
         if (s.off !== s.node) {
-          ctx.setLineDash([]);
-          ctx.strokeStyle = dim ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.95)';
-          ctx.lineWidth = dim ? 1.4 : 1.9;
-          trace(s.trainPath, s.node, s.off);
+          if (FRAGILE) line(halo, 5.5, [], s.trainPath, s.node, s.off);
+          line(FRAGILE ? core : (dim ? 0.10 : 0.95), dim ? 1.4 : FRAGILE ? 1.5 : 1.9,
+               FRAGILE ? DASH_TRAIN : [], s.trainPath, s.node, s.off);
           if (!dim) placeIcon(pathPts(s.trainPath, s.node, s.off), 'train', picked === s.node);
         }
         // そこから自宅までタクシー
-        ctx.strokeStyle = dim ? 'rgba(255,255,255,.09)' : 'rgba(255,255,255,.8)';
-        ctx.lineWidth = dim ? 1.4 : 1.9; ctx.setLineDash([5, 4]);
-        trace(s.taxiPath, s.off, home);
-        ctx.setLineDash([]);
+        if (FRAGILE) line(halo * 0.85, 5.5, [], s.taxiPath, s.off, home);
+        line(FRAGILE ? core * 0.92 : (dim ? 0.09 : 0.8), dim ? 1.4 : FRAGILE ? 1.5 : 1.9,
+             FRAGILE ? DASH_TAXI : [5, 4], s.taxiPath, s.off, home);
         if (!dim) placeIcon(pathPts(s.taxiPath, s.off, home), 'taxi', picked === s.node);
         // 降りる駅（実線と破線の変わり目）
         ctx.fillStyle = dim ? 'rgba(255,255,255,.18)' : '#ffffff';
@@ -778,6 +819,17 @@
       }
     }
   }
+
+  // ---- 実験（2026-10-06）: 帰り道を「はかない」線にする ----
+  // 薄くすると見えなくなるので、**2 枚重ねて両立させる**。
+  //   1 枚目 連続した淡いハロー（太い・薄い）… 遠目でも線がつながって見える＝可視性
+  //   2 枚目 途切れながら流れる細い芯（破線を進む向きへ動かす）… はかなさ・不安定さ
+  // さらに**ゆっくり明滅**させる。位相は駅ごとにずらす（一斉に光ると機械的になる）。
+  // 戻すときは FRAGILE を false に（枝 exp-fragile-route）。
+  const FRAGILE = true;
+  const BREATH_MS = 1700;      // 明滅の速さ（sin の周期の目安）
+  const DRIFT_PX = 15;         // 芯が流れる速さ（px/秒）。流れる向きは自宅へ
+  const DASH_TRAIN = [17, 3.5], DASH_TAXI = [5, 4.5];
 
   // ---- 経路に置く乗り物の印 ----
   // 実線か破線かだけだと何に乗るのか伝わらないので、区間の真ん中に小さな印を重ねる。
@@ -1654,7 +1706,7 @@
 
   // 描画はこのループひとつに任せる。ただし**変わったときだけ描く**
   // （動いているのはズームの移動と、終電が落ちた輪だけ）
-  let lastKey = '';
+  let lastKey = '', lastLive = 0;
   function frame(now) {
     if (tw) stepTween(now);
     stepMeteor(now);
@@ -1663,7 +1715,14 @@
     syncBack();
     const key = [view.k.toFixed(3), view.tx | 0, view.ty | 0, W, H,
                  t0, home, hover, picked, dataSeq].join('|');
-    if (key !== lastKey || tw || flashes.size || meteor) { lastKey = key; draw(now); }
+    // 帰り道がゆらいでいる間は描き続ける（終電が 1 本も行っていない間は止まったまま）。
+    // ただし**ゆらぎのためだけの描き直しは 1 秒に 22 回まで**。
+    // 明滅も流れもゆっくりなので、これで十分なめらかに見える（毎フレームだと機械が苦しい）。
+    const living = FRAGILE && data
+      && data.spots.some(x => x.state === 'taxi' && x.off != null);
+    if (key !== lastKey || tw || flashes.size || meteor || (living && now - lastLive > 45)) {
+      lastKey = key; lastLive = now; draw(now);
+    }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
