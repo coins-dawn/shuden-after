@@ -109,6 +109,8 @@
   /* 時刻は左パネルの中。時計と再生ボタンを横に並べる */
   .timecard .now { display: flex; align-items: center; justify-content: space-between;
     gap: 10px; margin: 2px 0 7px; }
+  /* 文字が変わっても幅が動かないようにする */
+  .timecard .now .toggle { min-width: 92px; text-align: center; }
   /* デジタル時計。数字の幅をそろえて、コロンだけゆっくり点滅させる */
   .clock { font-family: "DIN Alternate", "Avenir Next", "Helvetica Neue", Consolas, monospace;
     font-size: 31px; font-weight: 600; letter-spacing: .04em; line-height: 1;
@@ -217,7 +219,7 @@
     <div class="lab"><span>いま出発する時刻</span></div>
     <div class="now">
       <div class="clock" id="time-val">--<i>:</i>--</div>
-      <button class="toggle" id="play" aria-pressed="false">時刻を進める</button>
+      <button class="toggle" id="play" aria-pressed="false">スタート</button>
     </div>
     <input id="time" type="range" min="1200" max="1620" step="1" value="1360">
     <div class="ends"><span id="t-from">—</span><span id="t-to">—</span></div>
@@ -1699,7 +1701,7 @@
   let playing = false, playTimer = null;
   function setPlaying(on) {
     playing = on;
-    playBtn.textContent = on ? '停止' : '時刻を進める';
+    playBtn.textContent = on ? 'ストップ' : 'スタート';
     playBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
     if (playTimer) clearInterval(playTimer);
     playTimer = null;
