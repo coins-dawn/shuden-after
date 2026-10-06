@@ -1658,8 +1658,10 @@
     if (labelAt(e.clientX, e.clientY) >= 0) {
       tip.style.display = 'none'; cv.style.cursor = 'pointer'; return;
     }
+    // 名前を持っている駅だけ吹き出しを出す。
+    // 地図の下地には**画面に名前が出る駅ぶんしか名前を入れていない**
     const i = nearest(e.clientX, e.clientY);
-    if (i < 0) { tip.style.display = 'none'; cv.style.cursor = 'grab'; return; }
+    if (i < 0 || !NODES[i].n) { tip.style.display = 'none'; cv.style.cursor = 'grab'; return; }
     // 押せるのは候補 10 駅だけ。ほかの駅で指の形を出すと「自宅に選べる」ように見えて
     // 紛らわしいので、名前を出すだけにする
     cv.style.cursor = hit >= 0 ? 'pointer' : 'grab';

@@ -258,7 +258,20 @@ def main():
     print("  %d ファイル  合計 %.1f MB  1 自宅あたり %.1f KB"
           % (len(IDX), total / 1e6, total / len(IDX) / 1024))
 
-    # 5) 索引と、地図まわりのファイル
+    # 5) 画面に名前が出る駅を集める。
+    #    **地図の下地に 1,232 駅ぶんの名前を載せない**（2026-10-06 ユーザー指示）。
+    #    名前を出すのは 自宅の候補・出発する駅・降りる駅・乗り降りと乗換の駅 だけ。
+    #    座標とつながりは線を描くのに要るので残す。
+    named = set(IDX) | {s["node"] for s in SPOTS}
+    for h in IDX:
+        d = data[h]
+        named |= {v for v in d["off"] if v != NONE16}
+        for enc in d["legs"]:
+            for leg in enc:
+                named.add(leg[2])
+                named.add(leg[4])
+
+    # 6) 索引と、地図まわりのファイル
     print("  道のり %d 本／路線名 %d 件" % (sum(len(data[h]["legs"]) for h in IDX), len(LINES)))
     idx = {
         "homes": HOMES,
@@ -270,10 +283,17 @@ def main():
                  "night": server.NIGHT_RATE},
     }
     (OUT / "index.json").write_text(json.dumps(idx, separators=(",", ":")), encoding="utf-8")
-    for f in ("base.json", "land.json", "spots.json", "homes.json"):
+    for f in ("land.json", "spots.json", "homes.json"):
         src = ROOT / "web" / "data" / f
         if src.exists():
             shutil.copy(src, OUT / f)
+    base = json.loads((ROOT / "web" / "data" / "base.json").read_text())
+    for i, nd in enumerate(base["nodes"]):
+        if i not in named:
+            nd["n"] = ""
+    (OUT / "base.json").write_text(json.dumps(base, separators=(",", ":"),
+                                              ensure_ascii=False), encoding="utf-8")
+    print("  駅名を載せたのは %d 駅（全 %d 駅のうち）" % (len(named), len(base["nodes"])))
     (OUT.parent / ".nojekyll").write_text("")
     print("書きました: %s" % OUT)
 
