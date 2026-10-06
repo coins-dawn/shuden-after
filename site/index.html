@@ -1883,22 +1883,34 @@
     capR.style.strokeDashoffset = '56.5';
     dirtyWalls();
   }
+  // ⚠ 囲む相手は動く（トーストは駅名が足されると横に伸び、中央寄せなので左右にずれる。
+  // 一覧は行が増えると下がる）。**毎フレーム測り直す**。変わったときだけ書く。
+  let spotRe = null, spotWas = '';
   function spotEl(sel, pad) {
-    const el = document.querySelector(sel);
-    if (!el) return spotOff();
-    const r = el.getBoundingClientRect(), q = pad == null ? 8 : pad;
-    hi.style.display = 'block';
-    hi.style.left = (r.left - q) + 'px'; hi.style.top = (r.top - q) + 'px';
-    hi.style.width = (r.width + q * 2) + 'px'; hi.style.height = (r.height + q * 2) + 'px';
-    hi.style.borderRadius = '10px';
+    const q = pad == null ? 8 : pad;
+    spotRe = () => {
+      const el = document.querySelector(sel);
+      if (!el || getComputedStyle(el).display === 'none') { hi.style.display = 'none'; return; }
+      const r = el.getBoundingClientRect();
+      const key = [r.left, r.top, r.width, r.height].join();
+      if (key === spotWas) return;
+      spotWas = key;
+      hi.style.display = 'block';
+      hi.style.left = (r.left - q) + 'px'; hi.style.top = (r.top - q) + 'px';
+      hi.style.width = (r.width + q * 2) + 'px'; hi.style.height = (r.height + q * 2) + 'px';
+      hi.style.borderRadius = '10px';
+    };
+    spotWas = '';
+    spotRe();
   }
   function spotMap(x, y, r) {
+    spotRe = null; spotWas = '';
     hi.style.display = 'block';
     hi.style.left = (x - r) + 'px'; hi.style.top = (y - r) + 'px';
     hi.style.width = hi.style.height = (r * 2) + 'px';
     hi.style.borderRadius = '50%';
   }
-  const spotOff = () => { hi.style.display = 'none'; };
+  const spotOff = () => { spotRe = null; spotWas = ''; hi.style.display = 'none'; };
   const unpin = () => { toastPin = false; toastEl.classList.remove('show'); };
 
   // 時刻を動かす（load を待つ）
@@ -1947,16 +1959,14 @@
       html: '右の一覧は、同じ内容を表にしたものです。残り時間の短い順、終電後は運賃の安い順に並びます。' },
     { ms: 9000, at: AT0, setup: () => { clearPicked(); resume(); }, mark: () => spotEl('#play', 6),
       html: '「スタート」を押すと時刻が進みます。終電が行った駅から順に、<b>緑から赤へ</b>変わります。' },
-    { ms: 9000, at: () => tFrom + 20, setup: () => { clearPicked(); resume(); },
-      html: '路線の色は、時間とともに<b>灰色</b>に抜けていきます。終電のあとの帰り道を見やすくするためです。' },
-    { ms: 8000, at: () => tFrom + 41, setup: () => { clearPicked(); resume(); },
+    { ms: 8000, at: () => tFrom + 22, setup: () => { clearPicked(); resume(); },
       html: '赤い点のまわりの<b>滲みがタクシー代</b>です。淡いほど安く、濃いほど高くつきます。' },
-    { ms: 9000, mark: () => spotEl('.toast', 6), at: () => tFrom + 60,
+    { ms: 9000, mark: () => spotEl('.toast', 6), at: () => tFrom + 45,
       setup: async () => { clearPicked(); resume(); toastPin = true; clearTimeout(toastTimer); await makeToast(); },
       html: '終電が行った駅は、上に<b>「いま行きました」</b>と出ます。地図では、その駅から輪が広がって消えます。' },
-    { ms: 10000, at: () => tFrom + 89, setup: () => { resume(); focus(SPOTS.find(x => x.name === '横浜').node); },
+    { ms: 10000, at: () => tFrom + 70, setup: () => { resume(); focus(SPOTS.find(x => x.name === '横浜').node); },
       html: 'ひとつ選ぶと、その帰り方だけが残ります。<b>白い線路が電車</b>、<b>白い破線がタクシー</b>です。時刻はそのまま進みます。' },
-    { ms: 10000, mark: () => spotEl('.item.sel', 4), at: () => tFrom + 111,
+    { ms: 10000, mark: () => spotEl('.item.sel', 4), at: () => tFrom + 92,
       setup: () => { resume(); focus(SPOTS.find(x => x.name === '横浜').node); },
       html: '右の一覧に、<b>何時にどの路線に乗るか</b>が出ます。どこで乗り換えるかも分かります。' },
     { ms: 8000, setup: pause,
@@ -2016,6 +2026,7 @@
   // （動いているのはズームの移動と、終電が落ちた輪だけ）
   let lastKey = '', lastLive = 0;
   function frame(now) {
+    if (spotRe) spotRe();              // 囲んでいる相手に追いかける
     if (tw) stepTween(now);
     stepMeteor(now);
     if (flashes.size)
