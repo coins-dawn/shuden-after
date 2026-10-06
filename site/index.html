@@ -231,9 +231,12 @@
 
     <h3>データの出典</h3>
     <ul>
-      <li>駅・路線・列車時刻表 …
+      <li>列車時刻表 …
         <a href="https://www.odpt.org/" target="_blank" rel="noopener">公共交通オープンデータセンター</a>
         （平日ダイヤ、鉄道 10 事業者 <span id="about-lines">—</span> 路線）</li>
+      <li>駅の位置・名前と路線の線 …
+        <a href="https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-v3_1.html" target="_blank" rel="noopener">国土数値情報（鉄道 2025年）</a>を加工。
+        <b>路線の色は自前の配色</b>です</li>
       <li>海岸線・県境 …
         <a href="https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-v3_1.html" target="_blank" rel="noopener">国土数値情報（行政区域 2025年）</a>を加工</li>
       <li>道路 … <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener">OpenStreetMap</a>（ODbL）</li>
@@ -284,14 +287,27 @@
   const SKY = await fetch('data/stars.json').then(r => r.ok ? r.json() : null).catch(() => null);
   const SPOTS = await (await fetch('data/spots.json')).json();
   const INDEX = await (await fetch('data/index.json')).json();
-  const NODES = base.nodes, EDGES = base.edges, COLORS = base.colors;
+  const NODES = base.nodes, COLORS = base.colors;
   const N = NODES.length;
-  // **どの路線にもつながっていない駅（90 駅）は出さない。**
-  // 点が 1 つだけ浮いていると、夜が深まったとき星と見分けがつかない。
-  // 枠（地図の収まり）も、出す駅だけで決める。
-  const CONN = new Uint8Array(N);
-  for (const [a, b] of EDGES) if (NODES[a].v && NODES[b].v) { CONN[a] = 1; CONN[b] = 1; }
-  const VIS = []; for (let i = 0; i < N; i++) if (NODES[i].v && CONN[i]) VIS.push(i);
+  const VIS = []; for (let i = 0; i < N; i++) if (NODES[i].v) VIS.push(i);
+
+  // ---- 路線の線 ----
+  // **国土数値情報 N02（鉄道）の折れ線**。駅と駅を結んだ線ではなく、実際の線形。
+  // 色は事業者ごと（`scripts/build_rail.py` の自前の配色）。
+  const railLon = [], railLat = [], railRange = [];
+  for (const seg of (base.rails || [])) {
+    const a = railLon.length;
+    for (let i = 1; i < seg.length; i += 2) { railLat.push(seg[i]); railLon.push(seg[i + 1]); }
+    railRange.push([a, railLon.length, seg[0]]);
+  }
+  const RV = railLon.length;
+  const railX = new Float64Array(RV), railY = new Float64Array(RV);
+  const RAIL_BY_COLOR = new Map();
+  for (const r of railRange) {
+    let g = RAIL_BY_COLOR.get(r[2]);
+    if (!g) RAIL_BY_COLOR.set(r[2], g = []);
+    g.push(r);
+  }
 
   // ---- 投影 ----
   const latMean = NODES.reduce((s, n) => s + (n.v ? n.y : 0), 0) / VIS.length;
@@ -349,6 +365,10 @@
     for (let v = 0; v < LV; v++) {
       landX[v] = ox + (landLon[v] * kx - x0) * s;
       landY[v] = oy + (-landLat[v] - y0) * s;
+    }
+    for (let v = 0; v < RV; v++) {
+      railX[v] = ox + (railLon[v] * kx - x0) * s;
+      railY[v] = oy + (-railLat[v] - y0) * s;
     }
     dirtyWalls();
   }
@@ -630,25 +650,22 @@
       ctx.stroke();
     }
 
-    // 路線（うっすら）
-    ctx.lineWidth = 1.1; ctx.lineCap = 'round';
-    const byColor = new Map();
-    for (const [a, b, c] of EDGES) {
-      if (!NODES[a].v || !NODES[b].v) continue;
-      let g = byColor.get(c); if (!g) { g = []; byColor.set(c, g); }
-      g.push(a, b);
-    }
-    // はじまりは路線の色。動かしはじめると灰色に抜けていき、
+    // 路線（うっすら）。はじまりは路線の色、動かしはじめると灰色に抜け、
     // 終電が全部行ったところでさらに薄くなる（もう動いていない）
+    // N02 は上下線や貨物線が別々の線で入っていて重なるので、
+    // 1 本ぶんは細く・濃いめにする（薄いと重なったところだけ濃くなって汚い）
+    ctx.lineWidth = 1.3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     const dd = deadness(), gr = Math.max(grayness(), dd);
-    const railA = ((0.46 * (1 - gr) + 0.30 * gr) * (1 - dd) + 0.10 * dd).toFixed(3);
-    for (const [c, arr] of byColor) {
+    const railA = ((0.62 * (1 - gr) + 0.34 * gr) * (1 - dd) + 0.11 * dd).toFixed(3);
+    for (const [c, segs] of RAIL_BY_COLOR) {
       const h = (COLORS[c] || '#8d93a0').replace('#', '');
       const rgb = [0, 2, 4].map((o, j) => mixCh(parseInt(h.slice(o, o + 2), 16), RAIL_GRAY[j], gr));
       ctx.strokeStyle = 'rgba(' + rgb.join(',') + ',' + railA + ')';
       ctx.beginPath();
-      for (let k = 0; k < arr.length; k += 2) {
-        ctx.moveTo(SX(arr[k]), SY(arr[k])); ctx.lineTo(SX(arr[k+1]), SY(arr[k+1]));
+      for (const [a, b] of segs) {
+        ctx.moveTo(railX[a] * view.k + view.tx, railY[a] * view.k + view.ty);
+        for (let v = a + 1; v < b; v++)
+          ctx.lineTo(railX[v] * view.k + view.tx, railY[v] * view.k + view.ty);
       }
       ctx.stroke();
     }
@@ -1514,10 +1531,9 @@
   }
 
   // ---- 選んだ帰り方の明細 ----
-  // 路線の色は地図と合わせる（base.json の路線名で引く）
-  const LINECOL = new Map();
-  base.lines.forEach((nm, i) => LINECOL.set(nm, COLORS[i] || '#8e97a8'));
-  const lineName = i => (INDEX.lines && INDEX.lines[i]) || '鉄道';
+  // 路線名は地図と同じ色で出す（index.json が事業者ごとの色番号を持っている）
+  const lineName = i => (INDEX.lines[i] && INDEX.lines[i][0]) || '鉄道';
+  const lineCol = i => (INDEX.lines[i] && COLORS[INDEX.lines[i][1]]) || '#b9c2d1';
   const at = (t, name, bold) => '<div class="at"><span class="tm">'
     + (t == null ? '' : fmt(t)) + '</span>' + (bold ? '<b>' + name + '</b>' : name) + '</div>';
 
@@ -1533,7 +1549,7 @@
         out.push(at(null, NODES[g.an].n, true));
         continue;
       }
-      const nm = lineName(g.line), c = LINECOL.get(nm) || '#b9c2d1', bits = [];
+      const nm = lineName(g.line), c = lineCol(g.line), bits = [];
       if (g.dep !== 0xFFFF) bits.push(fmt(g.dep) + ' 発');
       bits.push((g.n - 1) + '駅');
       if (g.art !== 0xFFFF && g.dep !== 0xFFFF && g.art > g.dep) bits.push((g.art - g.dep) + '分');
@@ -1690,7 +1706,7 @@
   document.getElementById('about-btn').onclick = () => openAbout(true);
   document.getElementById('about-x').onclick = () => openAbout(false);
   sheet.onclick = e => { if (e.target === sheet) openAbout(false); };
-  document.getElementById('about-lines').textContent = base.lines.length;
+  document.getElementById('about-lines').textContent = INDEX.railways;
 
   window.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;

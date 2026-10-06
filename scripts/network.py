@@ -91,7 +91,7 @@ class Network:
         # --- 列車を (ノード列, 着時刻列, 発時刻列) に変換 ---
         railways = {r["owl:sameAs"]: r.get("dc:title") or r["owl:sameAs"].split(".")[-1]
                     for r in json.loads((RAW / "railways.json").read_text())}
-        self.trips, self.trip_line, self.trip_span = [], [], []
+        self.trips, self.trip_line, self.trip_span, self.trip_op = [], [], [], []
         by_node = defaultdict(list)     # ノード -> [(trip_idx, 停車位置)]
         for tt in json.loads((RAW / "train_timetables.json").read_text()):
             seq = []
@@ -117,6 +117,9 @@ class Network:
             # 便の走っている時間帯。探索でその時刻に関係ない便を飛ばすのに使う
             self.trip_span.append((seq[0][2], seq[-1][1]))
             self.trip_line.append(railways.get(tt["odpt:railway"], ""))
+            # 事業者は路線 id に入っている（odpt.Railway:JR-East.Yamanote → JR-East）。
+            # 明細の路線名を地図と同じ色で出すのに使う
+            self.trip_op.append(tt["odpt:railway"].split(":")[-1].split(".")[0])
             for pos, (nid, _, _) in enumerate(seq):
                 by_node[nid].append((idx, pos))
         self.by_node = by_node

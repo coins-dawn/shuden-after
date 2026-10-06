@@ -14,7 +14,8 @@ python3 -m http.server 8003 --directory site     # http://127.0.0.1:8003/
 
 ```bash
 python3 scripts/fetch_odpt.py       # 駅・路線・列車時刻表を取得（要トークン、下記）
-python3 scripts/build_base.py       # 駅・路線 → web/data/base.json
+python3 scripts/build_base.py       # 駅・路線（探索用の内部データ）→ web/data/base.json
+python3 scripts/build_rail.py       # 地図の下地（N02 の駅と線）→ web/data/rail.json
 python3 scripts/build_land.py       # 海岸線・県境 → web/data/land.json
 python3 scripts/pick_spots.py       # 終電を逃しうる 20 駅 → web/data/spots.json
 python3 scripts/pick_homes.py       # 自宅に選べる 10 駅 → web/data/homes.json
@@ -39,7 +40,8 @@ python3 server.py 8003              # 開発用。/api/night で任意の条件�
 scripts/
   fetch_odpt.py        ODPT から駅・路線・列車時刻表（平日ダイヤ）を取る
   network.py           時刻表ベースの探索ネットワークと RAPTOR
-  build_base.py        駅ノード・路線の線・ラインカラー → web/data/base.json
+  build_base.py        探索用の駅ノード（**公開しない内部データ**）→ web/data/base.json
+  build_rail.py        地図の下地を国土数値情報 N02 から作る → web/data/rail.json
   build_land.py        国土数値情報 N03 から海岸線と県境 → web/data/land.json
   pick_spots.py        終電を逃しうる 20 駅 → web/data/spots.json
   pick_homes.py        自宅に選べる 10 駅 → web/data/homes.json
@@ -58,10 +60,10 @@ site/data/home/*.bin   自宅ごとの答え（1 ファイル 35KB ほど）
 
 | | |
 |---|---|
-| 最初に落ちるもの | **252KB**（画面 57KB・地図 85KB・海岸線 54KB・星 22KB・自宅 1 件 35KB ほか） |
+| 最初に落ちるもの | **400KB**（地図 199KB・画面 84KB・海岸線 54KB・星 22KB・自宅 1 件 35KB ほか）。**gzip で 105KB** |
 | 自宅を変えたとき | **その自宅のファイル 1 つだけ**（31〜41KB） |
 | 時刻を変えたとき | **通信なし**（手元のデータだけで引ける） |
-| `site/` 全体 | **624KB / 18 ファイル** |
+| `site/` 全体 | **747KB / 18 ファイル** |
 
 ### タクシー運賃
 
@@ -99,7 +101,8 @@ site/data/home/*.bin   自宅ごとの答え（1 ファイル 35KB ほど）
 
 | データ | 提供元 | ライセンス |
 |---|---|---|
-| 駅・路線・列車時刻表 | [公共交通オープンデータセンター](https://www.odpt.org/) | 事業者ごとに異なる（下記） |
+| 列車時刻表 | [公共交通オープンデータセンター](https://www.odpt.org/) | 事業者ごとに異なる（下記） |
+| 駅の位置・名前と路線の線 | [国土数値情報 鉄道 N02（2025年）](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-v3_1.html) | 国土数値情報 利用約款 |
 | 星 | [Yale Bright Star Catalogue, 5th Revised Ed.](https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50)（Hoffleit & Warren 1991 / VizieR V/50） | 出典表示 |
 | 星座線 | [d3-celestial](https://github.com/ofrohn/d3-celestial) | BSD 3-Clause（下記） |
 | 海岸線・県境 | [国土数値情報 行政区域 N03](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-v3_1.html) | 国土数値情報 利用約款 |
@@ -138,14 +141,20 @@ BSD 3-Clause は**著作権表示を残すこと**を条件にしている。
 終電リミット・降りる駅・到着時刻・道路距離・運賃と、その経路の駅の並びだけ。
 **ここから 25,671 便の時刻表を復元することはできない。**
 
-**駅の名前は、画面に名前が出る駅ぶんしか配らない。**
-地図の下地（`site/data/base.json`）に名前が入っているのは **174 駅**
-（自宅の候補 10・出発する 20・降りる駅・乗り降りと乗換の駅）で、
-残り 1,058 駅は**名前を空にしてある**（座標とつながりは線を描くのに要るので残す）。
-`scripts/build_static.py` が書き出すときに落としている。
+**地図の下地に ODPT のデータは使わない。**
+`site/data/base.json`（駅の位置・名前と路線の線）は**国土数値情報 N02（鉄道）から作る**
+（`scripts/build_rail.py`）。N02 は国土数値情報利用約款で再配布できる。
 
-⚠ **それでも座標と路線のつながりは残る。**
-駅と路線の情報を公開することになるので、**公開前に各事業者のライセンスを確認すること。**
+- 駅の位置と名前 … N02 の駅（手元の 829 駅は**全部 N02 と突き合わせられた**）
+- 路線の線 … N02 の鉄道区間の**実際の線形**。探索に入っている 10 社ぶんだけ（新幹線は除く）
+- 路線の色 … N02 に色は無いので**自前の配色**（事業者ごと）
+
+⚠ **`odpt:Station` と `odpt:Railway` は配らない。** 探索には使うが、公開物には出さない。
+`web/data/base.json`（ODPT 由来の内部データ）は `.gitignore` で除外してある。
+
+⚠ **形式を変えても逃げられない。** 第8条4項(1) は「第三者が再利用できる状態での公開」を
+禁じていて、**ファイル形式のことは言っていない**。独自のバイナリにしても、読む手順は
+画面の JavaScript に書いてあるのだから、再利用できる状態であることは変わらない。
 
 画面下に、提供データである旨・正確性を保証しない旨・交通事業者へ直接問い合わせない旨・
 静的データの取得日を出している（開発者ガイドライン 3.1 / 2.2.1）。消さないこと。

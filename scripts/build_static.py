@@ -262,20 +262,17 @@ def main():
     #    **地図の下地に 1,232 駅ぶんの名前を載せない**（2026-10-06 ユーザー指示）。
     #    名前を出すのは 自宅の候補・出発する駅・降りる駅・乗り降りと乗換の駅 だけ。
     #    座標とつながりは線を描くのに要るので残す。
-    named = set(IDX) | {s["node"] for s in SPOTS}
-    for h in IDX:
-        d = data[h]
-        named |= {v for v in d["off"] if v != NONE16}
-        for enc in d["legs"]:
-            for leg in enc:
-                named.add(leg[2])
-                named.add(leg[4])
-
     # 6) 索引と、地図まわりのファイル
     print("  道のり %d 本／路線名 %d 件" % (sum(len(data[h]["legs"]) for h in IDX), len(LINES)))
+    # 明細の路線名を、地図と同じ色（事業者ごと）で出せるようにしておく
+    RAIL = json.loads((ROOT / "web" / "data" / "rail.json").read_text())
+    op_of = {}
+    for li, op in zip(NET.trip_line, NET.trip_op):
+        op_of.setdefault(li, op)
     idx = {
         "homes": HOMES,
-        "lines": LINES,
+        "lines": [[nm, RAIL["op"].get(op_of.get(nm, ""), 0)] for nm in LINES],
+        "railways": len({li for li in NET.trip_line if li}),
         "spots": [s["node"] for s in SPOTS],
         "time": {"from": T_FROM, "to": T_TO, "step": T_STEP},
         "fare": {"base": server.FARE_BASE, "baseM": server.FARE_BASE_M,
@@ -287,13 +284,25 @@ def main():
         src = ROOT / "web" / "data" / f
         if src.exists():
             shutil.copy(src, OUT / f)
+
+    # 地図の下地は **国土数値情報 N02** から作る（scripts/build_rail.py）。
+    # ODPT の odpt:Station / odpt:Railway は**配らない**（基本ライセンス第8条4項(1)）。
+    # ノードの並び（id）は探索のものをそのまま使い、名前と座標だけ N02 のものに差し替える。
     base = json.loads((ROOT / "web" / "data" / "base.json").read_text())
-    for i, nd in enumerate(base["nodes"]):
-        if i not in named:
-            nd["n"] = ""
-    (OUT / "base.json").write_text(json.dumps(base, separators=(",", ":"),
+    nodes, miss = [], 0
+    for i in range(len(base["nodes"])):
+        r = RAIL["st"].get(str(i))
+        if r is None:
+            nodes.append({"n": "", "y": 0, "x": 0, "w": 0, "v": 0})   # 画面に出さない駅
+            miss += 1
+        else:
+            nodes.append({"n": r[2], "y": r[0], "x": r[1], "w": r[3], "v": 1})
+    out_base = {"nodes": nodes, "rails": RAIL["li"], "colors": RAIL["co"]}
+    (OUT / "base.json").write_text(json.dumps(out_base, separators=(",", ":"),
                                               ensure_ascii=False), encoding="utf-8")
-    print("  駅名を載せたのは %d 駅（全 %d 駅のうち）" % (len(named), len(base["nodes"])))
+    print("  地図の下地: N02 の駅 %d（出さない %d）・線 %d 本  %.1f KB"
+          % (len(nodes) - miss, miss, len(RAIL["li"]),
+             (OUT / "base.json").stat().st_size / 1024))
     (OUT.parent / ".nojekyll").write_text("")
     print("書きました: %s" % OUT)
 
