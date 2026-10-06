@@ -102,9 +102,25 @@
 
   .list { position: absolute; top: 86px; right: 20px; z-index: 3; width: 286px;
     background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
-    padding: 12px 13px 13px; max-height: calc(100vh - 150px); overflow: auto; }
+    padding: 12px 13px 13px; max-height: calc(100vh - 150px);
+    display: flex; flex-direction: column; overflow: hidden; }
   .list h2 { margin: 0 0 6px; font-size: 11.5px; letter-spacing: .06em; font-weight: 600;
-    line-height: 1.35; }
+    line-height: 1.35; flex: none; }
+  #items { overflow: auto; }
+
+  /* 時刻は一覧の上に置く（操作の置き場所を右にまとめる） */
+  .timecard { flex: none; margin: -2px 0 11px; padding-bottom: 11px;
+    border-bottom: 1px solid rgba(238,241,246,.12); }
+  .timecard .now { display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin: 2px 0 7px; }
+  /* デジタル時計。数字の幅をそろえて、コロンだけゆっくり点滅させる */
+  .clock { font-family: "DIN Alternate", "Avenir Next", "Helvetica Neue", Consolas, monospace;
+    font-size: 31px; font-weight: 600; letter-spacing: .04em; line-height: 1;
+    color: var(--home); font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 16px rgba(255, 209, 102, .38); }
+  .clock i { font-style: normal; animation: tick 1.6s steps(1, end) infinite; }
+  @keyframes tick { 0%, 55% { opacity: 1; } 56%, 100% { opacity: .25; } }
+  .timecard .ends { color: var(--sub); margin-top: 2px; }
   .item { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline;
     gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(238,241,246,.07); cursor: pointer; }
   .item:last-child { border-bottom: 0; }
@@ -161,7 +177,12 @@
   .busy { position: absolute; top: 20px; right: 330px; z-index: 5; font-size: 11px;
     color: var(--home); letter-spacing: .1em; display: none; }
   @media (max-width: 820px) {
-    .list { display: none; }
+    /* 一覧は出せないが、時刻の操作は要る。下に時刻だけの帯として出す */
+    .list { display: block; width: auto; left: 12px; right: 12px; top: auto; bottom: 44px;
+      max-height: none; padding: 9px 11px; }
+    .list h2, #items { display: none; }
+    .timecard { margin: 0; padding: 0; border-bottom: 0; }
+    .clock { font-size: 26px; }
     .panel { width: calc(100vw - 24px); left: 12px; top: 74px; padding: 10px 11px 11px; }
     .head { top: 12px; left: 14px; }
     .head h1 { font-size: 17px; }
@@ -201,10 +222,6 @@
     <select id="home-sel"></select>
   </div>
   <div class="row">
-    <div class="lab"><span>いま出発する時刻</span><b id="time-val">22:00</b></div>
-    <input id="time" type="range" min="1200" max="1620" step="1" value="1360">
-    <div class="ends"><span id="t-from">—</span><span id="t-to">—</span></div>
-    <button class="toggle wide" id="play" aria-pressed="false">時刻を進める</button>
     <span class="hint">ホイールで拡大／ドラッグで移動</span>
   </div>
   <div class="row" id="legend" hidden>
@@ -215,6 +232,15 @@
 </div>
 
 <div class="list">
+  <div class="timecard">
+    <div class="lab"><span>いま出発する時刻</span></div>
+    <div class="now">
+      <div class="clock" id="time-val">--<i>:</i>--</div>
+      <button class="toggle" id="play" aria-pressed="false">時刻を進める</button>
+    </div>
+    <input id="time" type="range" min="1200" max="1620" step="1" value="1360">
+    <div class="ends"><span id="t-from">—</span><span id="t-to">—</span></div>
+  </div>
   <h2 id="list-title">終電のあとの帰り方</h2>
   <div id="items"></div>
 </div>
@@ -441,6 +467,9 @@
     : (MAP_FARE ? COL.taxi : heatCss(s.fare));
 
   const fmt = v => String(Math.floor(v / 60) % 24).padStart(2, '0') + ':' + String(v % 60).padStart(2, '0');
+  // デジタル時計。コロンだけ別の要素にして点滅させる
+  const setClock = v => { timeVal.innerHTML = String(Math.floor(v / 60) % 24).padStart(2, '0')
+    + '<i>:</i>' + String(v % 60).padStart(2, '0'); };
   const fmt2 = v => (v >= 1440 ? '翌 ' : '') + fmt(v);
   const yen = v => '¥' + v.toLocaleString();
 
@@ -1450,7 +1479,7 @@
     tEnds[0].textContent = fmt2(tFrom);
     tEnds[1].textContent = fmt2(tTo);
     t0 = Math.max(tFrom, Math.min(tTo, t0));
-    timeEl.value = t0; timeVal.textContent = fmt(t0);
+    timeEl.value = t0; setClock(t0);
     setNight(t0);                 // 暗さは範囲で測るので、範囲が変わったら測り直す
   }
 
@@ -1645,7 +1674,7 @@
   homeSel.onchange = () => setHome(+homeSel.value);
 
   const timeEl = document.getElementById('time'), timeVal = document.getElementById('time-val');
-  const tEnds = document.querySelectorAll('.ends span');
+  const tEnds = [document.getElementById('t-from'), document.getElementById('t-to')];
   const playBtn = document.getElementById('play');
 
   // 「全体に戻る」は、1 つ選んでいるときと、地図を動かしたあとに出す
@@ -1671,7 +1700,7 @@
   let timer = null;
   timeEl.addEventListener('input', () => {
     if (playing) setPlaying(false);
-    t0 = +timeEl.value; timeVal.textContent = fmt(t0); setNight(t0);
+    t0 = +timeEl.value; setClock(t0); setNight(t0);
     clearTimeout(timer); timer = setTimeout(load, 120);
   });
 
@@ -1686,12 +1715,12 @@
     playTimer = null;
     if (!on) return;
     // 右端で止まっているときに押したら、はじめから
-    if (t0 >= tTo) { t0 = tFrom; timeEl.value = t0; timeVal.textContent = fmt(t0); setNight(t0); load(); }
+    if (t0 >= tTo) { t0 = tFrom; timeEl.value = t0; setClock(t0); setNight(t0); load(); }
     playTimer = setInterval(() => {
       // **右端まで行ったら止める。** すぐ左へ戻すと、終わったあとの余韻が消える
       if (t0 >= tTo) { setPlaying(false); return; }
       t0 = Math.min(tTo, t0 + PLAY_STEP);
-      timeEl.value = t0; timeVal.textContent = fmt(t0); setNight(t0);
+      timeEl.value = t0; setClock(t0); setNight(t0);
       load();
     }, PLAY_MS);
   }
@@ -1785,7 +1814,7 @@
 
   layout();
   cv.style.cursor = 'grab';
-  timeVal.textContent = fmt(t0);
+  setClock(t0);
   setNight(t0);
   timeEl.value = t0;
 
