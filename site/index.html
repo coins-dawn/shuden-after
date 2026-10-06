@@ -225,9 +225,14 @@
     <button class="x" id="about-x" title="閉じる">✕</button>
     <h2>このサービスについて</h2>
     <p>終電を逃したとき、<b>そのときどこにいたか</b>で帰り方がどれだけ変わるのかを見る地図です。
-      自宅の最寄り駅を選んで時刻を進めると、首都圏の 10 駅それぞれに
+      自宅の最寄り駅を選んで時刻を進めると、首都圏の 20 駅それぞれに
       <b>「終電まであと何分か」</b>、終電が行ってしまったあとは
       <b>「電車で行けるところまで行って、そこからタクシーに乗ったときの運賃」</b>が出ます。</p>
+
+    <p>ここでいう<b>「終電」は、その駅から自宅まで帰り着ける最後の列車</b>のことです。
+      それを過ぎても電車そのものは走っているので、<b>行けるところまでは乗ります</b>
+      （上野 00:45 なら、山手線で池袋まで行ってからタクシーに乗るほうが
+      上野から乗るより ¥4,080 安い、というように）。</p>
 
     <h3>データの出典</h3>
     <ul>
@@ -237,8 +242,6 @@
       <li>駅の位置・名前と路線の線 …
         <a href="https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-v3_1.html" target="_blank" rel="noopener">国土数値情報（鉄道 2025年）</a>を加工。
         <b>路線の色は自前の配色</b>です</li>
-      <li>海岸線・県境 …
-        <a href="https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-v3_1.html" target="_blank" rel="noopener">国土数値情報（行政区域 2025年）</a>を加工</li>
       <li>道路 … <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener">OpenStreetMap</a>（ODbL）</li>
       <li>星 … <a href="https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50" target="_blank" rel="noopener">Yale Bright Star Catalogue, 5th Revised Ed.</a>
         （Hoffleit &amp; Warren 1991 / VizieR V/50）。<b>その日の東京の空</b>を、
