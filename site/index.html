@@ -780,7 +780,8 @@
     ICONS.length = 0;
     if (data) {
       for (const s of data.spots) {
-        if (s.state !== 'taxi' || s.off == null) continue;
+        // 終電が残っている駅は「電車だけの道」、終電後は「電車 → タクシー」
+        if (s.off == null) continue;
         const A = act();
         const dim = A >= 0 && A !== s.node;
         // **1 つ選んでいるときは、その帰り方だけを描く。**
@@ -814,14 +815,16 @@
             placeIcon(tp, 'train', picked === s.node);
           }
         }
-        // そこから自宅までタクシー
-        if (FRAGILE) line(halo * 0.85, 5.5, [], s.taxiPath, s.off, home);
-        line(FRAGILE ? core * 0.92 : (dim ? 0.09 : 0.8), dim ? 1.4 : FRAGILE ? 1.5 : 1.9,
-             FRAGILE ? DASH_TAXI : [5, 4], s.taxiPath, s.off, home);
-        if (!dim) placeIcon(pathPts(s.taxiPath, s.off, home), 'taxi', picked === s.node);
-        // 降りる駅（実線と破線の変わり目）
-        ctx.fillStyle = dim ? 'rgba(255,255,255,.18)' : '#ffffff';
-        ctx.beginPath(); ctx.arc(SX(s.off), SY(s.off), 2.6, 0, Math.PI * 2); ctx.fill();
+        // そこから自宅までタクシー（終電が残っているあいだは無い）
+        if (s.state === 'taxi') {
+          if (FRAGILE) line(halo * 0.85, 5.5, [], s.taxiPath, s.off, home);
+          line(FRAGILE ? core * 0.92 : (dim ? 0.09 : 0.8), dim ? 1.4 : FRAGILE ? 1.5 : 1.9,
+               FRAGILE ? DASH_TAXI : [5, 4], s.taxiPath, s.off, home);
+          if (!dim) placeIcon(pathPts(s.taxiPath, s.off, home), 'taxi', picked === s.node);
+          // 降りる駅（実線と破線の変わり目）
+          ctx.fillStyle = dim ? 'rgba(255,255,255,.18)' : '#ffffff';
+          ctx.beginPath(); ctx.arc(SX(s.off), SY(s.off), 2.6, 0, Math.PI * 2); ctx.fill();
+        }
       }
     }
 
@@ -1506,7 +1509,20 @@
       const lv = H.limit[si];
       row.limit = lv < 0 ? null : lv;
       if (row.limit !== null && t <= row.limit) {
-        row.state = 'train'; row.left = row.limit - t; out.push(row); continue;
+        row.state = 'train'; row.left = row.limit - t;
+        // 終電が残っているあいだは「電車だけで帰る道」が入っている（降りる駅＝自宅の駅）
+        const j = si * H.nt + ti;
+        if (H.off[j] !== 0xFFFF) {
+          row.off = H.off[j];
+          row.offName = NODES[H.off[j]].n;
+          row.offTime = H.at[j];
+          row.trainMin = H.at[j] - t;
+          row.legs = H.leg[j] === 0xFFFF ? null : H.legs[H.leg[j]];
+          row.trainPath = H.tr[j] === 0xFFFF ? null
+            : H.trPaths[H.tr[j]].map(id => [NODES[id].y, NODES[id].x]);
+          row.taxiPath = null;
+        }
+        out.push(row); continue;
       }
       const i = si * H.nt + ti, off = H.off[i];
       if (off === 0xFFFF) { row.state = 'unknown'; out.push(row); continue; }
@@ -1707,7 +1723,7 @@
     + (t == null ? '' : fmt(t)) + '</span>' + (bold ? '<b>' + name + '</b>' : name) + '</div>';
 
   function tripHTML(s) {
-    if (s.state !== 'taxi') return '';
+    if (s.state !== 'taxi' && !(s.state === 'train' && s.legs)) return '';
     // 駅の行は「着いた時刻」、区間の行は「乗る時刻・駅数・かかる分」。
     // 乗る駅はひとつ上の行と同じなので、区間には出さない
     const out = [at(t0, s.name + ' を出る', true)];
@@ -1724,12 +1740,15 @@
       if (g.art !== 0xFFFF && g.dep !== 0xFFFF && g.art > g.dep) bits.push((g.art - g.dep) + '分');
       out.push('<div class="seg"><span class="ln" style="color:' + c + '">' + nm + '</span>'
         + '<span class="nb">' + bits.join('・') + '</span></div>');
-      out.push(at(g.art === 0xFFFF ? null : g.art, NODES[g.an].n + ' 着', true));
+      out.push(at(g.art === 0xFFFF ? null : g.art,
+        NODES[g.an].n + (g.an === home ? '（自宅）着' : ' 着'), true));
     }
-    out.push('<div class="seg car">タクシー <span class="nb">'
-      + (s.km != null ? s.km + 'km' : '') + (s.fare != null ? '・' + yen(s.fare) : '')
-      + '</span></div>');
-    out.push(at(null, NODES[home].n + '（自宅）', true));
+    if (s.state === 'taxi') {
+      out.push('<div class="seg car">タクシー <span class="nb">'
+        + (s.km != null ? s.km + 'km' : '') + (s.fare != null ? '・' + yen(s.fare) : '')
+        + '</span></div>');
+      out.push(at(null, NODES[home].n + '（自宅）', true));
+    }
     return '<div class="trip">' + out.join('') + '</div>';
   }
 
@@ -2092,8 +2111,7 @@
     // 帰り道がゆらいでいる間は描き続ける（終電が 1 本も行っていない間は止まったまま）。
     // ただし**ゆらぎのためだけの描き直しは 1 秒に 22 回まで**。
     // 明滅も流れもゆっくりなので、これで十分なめらかに見える（毎フレームだと機械が苦しい）。
-    const living = FRAGILE && data
-      && data.spots.some(x => x.state === 'taxi' && x.off != null);
+    const living = FRAGILE && data && data.spots.some(x => x.off != null);
     if (key !== lastKey || tw || flashes.size || meteor || blinkSpots
         || (living && now - lastLive > 45)) {
       lastKey = key; lastLive = now; draw(now);

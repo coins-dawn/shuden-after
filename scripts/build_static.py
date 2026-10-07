@@ -37,6 +37,8 @@ GitHub Pages は静的ファイルしか置けないので、画面が要るも�
     uint16 電車の経路の数、続けて uint8 駅数 + uint16 駅 × 駅数
     uint16 タクシーの経路の数、続けて uint16 点数 + int16 緯度差,経度差 × 点数
            （最初の点は「降りる駅の座標」との差。1e-5 度を 1 とする）
+    終電が残っている欄（2026-10-07 から）: 降りる駅＝自宅の駅、道路距離と運賃は 0xFFFF、
+    タクシーの経路は無し。電車の経路と道のりは入っている（＝電車だけで帰る道）。
     ここから版 5:
     uint16 候補 × 時刻 ぶんの「道のりの番号」（0xFFFF = 無し）
     uint16 道のりの数、続けて uint8 区間数 + 区間 × 区間数。1 区間は 10 バイト:
@@ -70,6 +72,10 @@ SPOTS = server.SPOTS
 INF = server.INF
 T_FROM, T_TO, T_STEP = 1200, 1620, 5
 TIMES = list(range(T_FROM, T_TO + 1, T_STEP))
+# 終電が残っているあいだの「電車だけで帰る道」も入れる。ただし
+# **画面のスライダーの左端は 22:30**（site/index.html の T_LEFT）なので、
+# それより前の欄は読まれない。入れると道のりの表が倍になるだけなので入れない。
+T_SHOW = 22 * 60 + 30
 NONE16 = 0xFFFF
 OUT = ROOT / "site" / "data"
 SCALE = 100000
@@ -137,17 +143,23 @@ def main():
                 if h == c:
                     continue
                 lv = LIM[h][c]
-                if -INF < lv < INF and t <= lv:
-                    continue                      # まだ終電に間に合う
-                b = server.choose_off(arr, h)
-                if b is None:
-                    continue
-                fare, off, dist, at = b
+                still = -INF < lv < INF and t <= lv
+                if still:
+                    # まだ終電に間に合う。**電車だけで帰る道**を入れる（タクシーは無し）。
+                    # 降りる駅＝自宅の駅なので、道路距離も運賃も持たない
+                    if t < T_SHOW or arr[h] >= INF:
+                        continue
+                    off, at, dist, fare = h, arr[h], None, None
+                else:
+                    b = server.choose_off(arr, h)
+                    if b is None:
+                        continue
+                    fare, off, dist, at = b
                 d = data[h]
                 i = si * nt + ti
                 d["off"][i] = off
                 d["at"][i] = at
-                d["km"][i] = km10(dist)
+                d["km"][i] = NONE16 if dist is None else km10(dist)
                 d["fare"][i] = fare if fare is not None and fare < NONE16 else NONE16
                 # 電車の経路（降りる駅ごとに 1 回だけ復元して使い回す）
                 if off != c:
@@ -191,7 +203,10 @@ def main():
                             d["legmap"][key] = lid
                             d["legs"].append(enc)
                         d["leg"][i] = lid
-                # タクシーの経路
+                # タクシーの経路（電車だけで帰れるときは無い）
+                if off == h:
+                    d["tx"][i] = NONE16
+                    continue
                 key = (off, h)
                 pid = d["txmap"].get(key)
                 if pid is None:
