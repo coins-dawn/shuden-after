@@ -6,6 +6,7 @@ GitHub Pages は静的ファイルしか置けないので、画面が要るも�
 派生データの再配布は禁止）。配るのは「自宅ごとの答え」＝探索結果だけ。
 
     python3 scripts/build_static.py        # 15 分ほど
+    python3 scripts/build_seg.py           # そのあと（駅間を線路沿いにたどった形）
 
 できるもの:
 

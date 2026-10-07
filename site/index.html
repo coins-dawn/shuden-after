@@ -358,6 +358,9 @@
   const SKY = await fetch('data/stars.json').then(r => r.ok ? r.json() : null).catch(() => null);
   const SPOTS = await (await fetch('data/spots.json')).json();
   const INDEX = await (await fetch('data/index.json')).json();
+  // 駅と駅のあいだを線路沿いにたどった形（scripts/build_seg.py）。
+  // 無くても動く（そのときは駅どうしを直線で結ぶ）
+  const SEG = await fetch('data/seg.json').then(r => r.ok ? r.json() : {}).catch(() => ({}));
   const NODES = base.nodes, COLORS = base.colors;
   const N = NODES.length;
   const VIS = []; for (let i = 0; i < N; i++) if (NODES[i].v) VIS.push(i);
@@ -1497,6 +1500,24 @@
   // 運賃は先に計算して持っている（JS 側で計算すると丸めが食い違うため）
   const isNight = m => { const x = ((m % 1440) + 1440) % 1440; return x >= 22 * 60 || x < 5 * 60; };
 
+  // 答えが持っているのは**停まる駅の並び**なので、そのまま結ぶと駅のあいだが直線になる。
+  // 急行や中距離電車は停車駅が離れているので、横浜 → 東京 が一本の弦になっていた。
+  // seg.json の「2 駅のあいだの線路の形」を挟んで、路線に沿わせる。
+  function pathCoords(ids) {
+    const out = [];
+    for (let k = 0; k < ids.length; k++) {
+      const a = ids[k];
+      out.push([NODES[a].y, NODES[a].x]);
+      const b = ids[k + 1];
+      if (b == null) break;
+      const mid = SEG[(a < b ? a + ',' + b : b + ',' + a)];
+      if (!mid) continue;
+      if (a < b) for (let j = 0; j < mid.length; j++) out.push(mid[j]);
+      else for (let j = mid.length - 1; j >= 0; j--) out.push(mid[j]);
+    }
+    return out;
+  }
+
   function compute(H, t) {
     // 答えは 5 分刻みでしか持っていない。スライダーは 1 分刻みなので**切り上げて**引く。
     // 切り捨てると、まだ終電に間に合う時刻の欄（＝空）を引いてしまう。
@@ -1518,8 +1539,7 @@
           row.offTime = H.at[j];
           row.trainMin = H.at[j] - t;
           row.legs = H.leg[j] === 0xFFFF ? null : H.legs[H.leg[j]];
-          row.trainPath = H.tr[j] === 0xFFFF ? null
-            : H.trPaths[H.tr[j]].map(id => [NODES[id].y, NODES[id].x]);
+          row.trainPath = H.tr[j] === 0xFFFF ? null : pathCoords(H.trPaths[H.tr[j]]);
           row.taxiPath = null;
         }
         out.push(row); continue;
@@ -1536,8 +1556,7 @@
       const a = isNight(t) ? H.allNight[si] : H.allDay[si];
       row.allTaxi = a === 0xFFFF ? null : a;
       row.legs = H.leg[i] === 0xFFFF ? null : H.legs[H.leg[i]];
-      row.trainPath = H.tr[i] === 0xFFFF ? null
-        : H.trPaths[H.tr[i]].map(id => [NODES[id].y, NODES[id].x]);
+      row.trainPath = H.tr[i] === 0xFFFF ? null : pathCoords(H.trPaths[H.tr[i]]);
       if (H.tx[i] === 0xFFFF) row.taxiPath = null;
       else {
         let cy = Math.round(NODES[off].y * 1e5), cx = Math.round(NODES[off].x * 1e5);

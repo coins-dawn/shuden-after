@@ -21,6 +21,7 @@ python3 scripts/pick_homes.py       # 起点に選べる駅 10 → web/data/home
 python3 scripts/build_roadmatrix.py # 駅間の道路距離 → data/road_m.bin（要 OSRM）
 python3 scripts/build_taxipaths.py  # 道路の経路の形 → data/taxi_paths.bin（要 OSRM）
 python3 scripts/build_static.py     # 表示に使う値を先に全部計算 → site/data/（3 分ほど）
+python3 scripts/build_seg.py        # 駅間を線路沿いにたどった形 → site/data/seg.json
 python3 scripts/build_stars.py      # 夜空（実際の星と星座線）→ site/data/stars.json
 
 python3 scripts/verify_static.py 60 # site/ の値とその場の計算が一致するか
@@ -47,6 +48,8 @@ scripts/
   build_roadmatrix.py  OSRM の /table で駅間の道路距離行列 → data/road_m.bin
   build_taxipaths.py   OSRM の /route で道路の経路の形 → data/taxi_paths.bin
   build_static.py      表示に使う値を先に全部計算して site/data/ に書く
+  build_seg.py         駅と駅のあいだを線路沿いにたどった形 → site/data/seg.json
+                       （build_static.py のあとに実行する）
   build_stars.py       Yale Bright Star Catalogue と星座線 → site/data/stars.json
   verify_static.py     site/ の答えがその場の計算と一致するか確かめる
 server.py              開発用。site/ の配信と /api/night（答え合わせ用）
