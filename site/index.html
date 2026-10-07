@@ -1645,10 +1645,16 @@
       d.onmouseleave = () => setHover(-1);
       d.onclick = () => setPicked(s.node);
       box.appendChild(d);
-      // 選んだ行が折りたたみを開いて下にはみ出すことがあるので、一度だけ見える位置へ
-      if (picked === s.node && scrolled !== s.node) {
+      // 選んだ行が折りたたみを開いて下にはみ出すことがあるので、見える位置へ。
+      // 選んだ瞬間だけでなく、**時刻が進んで並びが変わり、はみ出したときも**戻す
+      if (picked === s.node) {
+        const first = scrolled !== s.node;
         scrolled = s.node;
-        requestAnimationFrame(() => d.scrollIntoView({ block: 'nearest' }));
+        requestAnimationFrame(() => {
+          const lr = box.parentElement.getBoundingClientRect(), r = d.getBoundingClientRect();
+          if (first || r.top < lr.top || r.bottom > lr.bottom)
+            d.scrollIntoView({ block: 'nearest' });
+        });
       }
     }
     if (picked < 0) scrolled = -1;
@@ -1970,10 +1976,10 @@
     { ms: 9000, mark: () => spotEl('.toast', 6), at: () => tFrom + 45,
       setup: async () => { clearPicked(); resume(); toastPin = true; clearTimeout(toastTimer); await makeToast(); },
       html: '終電が行った駅は、上に<b>「いま行きました」</b>と出ます。地図では、その駅から輪が広がって消えます。' },
-    { ms: 10000, at: () => tFrom + 70, setup: () => { resume(); focus(SPOTS.find(x => x.name === '横浜').node); },
+    { ms: 10000, at: () => tFrom + 70, setup: () => { resume(); focus(SPOTS.find(x => x.name === '中野').node); },
       html: 'ひとつ選ぶと、その帰り方だけが残ります。<b>白い線路が電車</b>、<b>白い破線がタクシー</b>です。' },
     { ms: 10000, mark: () => spotEl('.item.sel', 4), at: () => tFrom + 92,
-      setup: () => { resume(); focus(SPOTS.find(x => x.name === '横浜').node); },
+      setup: () => { resume(); focus(SPOTS.find(x => x.name === '中野').node); },
       html: '右の一覧に、<b>何時にどの路線に乗るか</b>が出ます。どこで乗り換えるかも分かります。' },
     { ms: 8000, setup: pause,
       html: '自宅を変えると、終電も帰り方も運賃も変わります。' },
