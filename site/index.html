@@ -1957,7 +1957,7 @@
       html: '時刻はここ。スライダーを動かすことで<b>シミュレーションの時刻</b>を前後させることができます。' },
     { ms: 8000, at: AT0, setup: pause,
       mark: () => { const sp = SPOTS.find(x => x.name === '新宿'); spotMap(SX(sp.node), SY(sp.node), 52); },
-      html: '地図上の丸が出発する駅です。<b>緑</b>はまだ終電に間に合う、<b>黄色</b>はまもなく、<b>赤</b>は終電が行ったあとと表します。' },
+      html: '地図上の丸が出発する駅です。<b>緑</b>はまだ終電に間に合う、<b>黄色</b>はまもなく、<b>赤</b>は終電が行ったあとを表します。' },
     { ms: 7000, at: AT0, setup: pause, mark: () => spotEl('.list', 6),
       html: '右の一覧は、同じ内容を表にしたものです。残り時間の短い順、終電後は運賃の安い順に並びます。' },
     { ms: 9000, at: AT0, setup: () => { clearPicked(); resume(); }, mark: () => spotEl('#play', 6),
