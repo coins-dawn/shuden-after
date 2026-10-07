@@ -1763,11 +1763,19 @@
     tween(1, 0, 0);
   };
 
-  let timer = null;
+  // つまみを**動かしている最中も**引き直す。
+  // 以前は「止まってから 120ms」（デバウンス）だったので、離すまで何も変わらなかった。
+  // いまは「最大 LOAD_MS に 1 回」（スロットル）＋最後にもう 1 回。
+  // 時刻が動くと路線の灰色ぐあいも変わって下地を引き直すので、毎回は呼ばない
+  const LOAD_MS = 80;
+  let timer = null, lastLoad = 0;
   timeEl.addEventListener('input', () => {
     if (playing) setPlaying(false);
     t0 = +timeEl.value; setClock(t0); setNight(t0);
-    clearTimeout(timer); timer = setTimeout(load, 120);
+    clearTimeout(timer);
+    const now = performance.now(), wait = LOAD_MS - (now - lastLoad);
+    if (wait <= 0) { lastLoad = now; load(); }
+    else timer = setTimeout(() => { lastLoad = performance.now(); load(); }, wait);
   });
 
   // 1 分ずつ進める。5 分ずつだと「あと N 分」が飛んで見え、暗くなり方も段になる
