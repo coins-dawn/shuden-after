@@ -163,7 +163,7 @@
   .foot a { color: #93a0b4; }
   /* デモの字幕と、注目させる枠 */
   .cap { position: absolute; left: 50%; bottom: 54px; transform: translateX(-50%); z-index: 6;
-    width: min(780px, calc(100vw - 48px)); padding: 14px 20px; display: flex;
+    width: min(880px, calc(100vw - 48px)); padding: 14px 20px; display: flex;
     align-items: center; gap: 16px;
     background: rgba(8, 11, 17, .93); border: 1px solid rgba(238,241,246,.18);
     border-radius: 8px; font-size: 17px; line-height: 1.65; letter-spacing: .02em;
@@ -1870,8 +1870,11 @@
   let demoOn = false, demoTimer = null, stepAt = -1;
 
   // 「。」で切って一文ずつ塊にする。長すぎる一文はやむなく途中で折り返る
+  // 「。」で切る。長すぎる一文は「｜」を書いておくと、そこでも切れる（読点の位置で折り返す）
   const bySentence = html => html.split('。')
-    .filter(t => t.trim()).map(t => '<span class="s">' + t + '。</span>').join('');
+    .filter(t => t.trim()).map(t => t + '。')
+    .flatMap(t => t.split('｜')).filter(t => t.trim())
+    .map(t => '<span class="s">' + t + '</span>').join('');
 
   function say(html, ms) {
     capT.innerHTML = bySentence(html);
@@ -1943,34 +1946,34 @@
   const AT0 = () => tFrom;
   const STEPS = [
     { ms: 7000, at: AT0, setup: pause,
-      html: '終電を逃したとき、<b>そのときどこにいたか</b>で帰り方は大きく変わります。それを地図で見るものです。' },
+      html: 'このサービスでは、出発する駅ごとに、｜<b>電車とタクシーを利用した終電後の帰り方と料金</b>を地図上で可視化します。' },
     { ms: 8000, at: AT0, setup: pause,
-      html: '首都圏の <b>20 駅</b>について、終電までの残り時間を出します。終電のあとは、<b>電車で行けるところまで行ってタクシーに乗った運賃</b>です。' },
+      html: '首都圏の <b>20駅</b>について、終電までの残り時間を出します。終電のあとは、<b>電車で行けるところまで行ってタクシーに乗った運賃</b>を出します。' },
     { ms: 7000, at: AT0, setup: pause,
       html: '使っているのは、公共交通オープンデータセンターの<b>列車時刻表</b>です。平日ダイヤ、鉄道 10 事業者 64 路線ぶん。' },
     { ms: 7000, at: AT0, setup: pause, mark: () => spotEl('.panel .row:first-child'),
-      html: '自宅の最寄り駅をここで選びます。<b>10 駅</b>から選べて、選び直すと数字が全部入れ替わります。' },
+      html: '自宅の最寄り駅をここで選びます。<b>10駅</b>から選ぶことができます。' },
     { ms: 8000, at: AT0, setup: pause, mark: () => spotEl('.timecard'),
-      html: '時刻はここ。スライダーは <b>22:30</b> から、<b>最後の終電の 20 分後</b>までです。' },
+      html: '時刻はここ。スライダーを動かすことで<b>シミュレーションの時刻</b>を前後させることができます。' },
     { ms: 8000, at: AT0, setup: pause,
       mark: () => { const sp = SPOTS.find(x => x.name === '新宿'); spotMap(SX(sp.node), SY(sp.node), 52); },
-      html: '地図の丸が、その 20 駅です。<b>緑</b>はまだ間に合う、<b>黄色</b>はまもなく、<b>赤</b>は終電が行ったあとです。' },
+      html: '地図上の丸が出発する駅です。<b>緑</b>はまだ終電に間に合う、<b>黄色</b>はまもなく、<b>赤</b>は終電が行ったあとと表します。' },
     { ms: 7000, at: AT0, setup: pause, mark: () => spotEl('.list', 6),
       html: '右の一覧は、同じ内容を表にしたものです。残り時間の短い順、終電後は運賃の安い順に並びます。' },
     { ms: 9000, at: AT0, setup: () => { clearPicked(); resume(); }, mark: () => spotEl('#play', 6),
       html: '「スタート」を押すと時刻が進みます。終電が行った駅から順に、<b>緑から赤へ</b>変わります。' },
     { ms: 8000, at: () => tFrom + 22, setup: () => { clearPicked(); resume(); },
-      html: '赤い点のまわりの<b>滲みがタクシー代</b>です。淡いほど安く、濃いほど高くつきます。' },
+      html: '<b>赤い円</b>は帰宅のためにタクシー代が発生していることを表します。淡いほど安く、濃いほど高くつきます。' },
     { ms: 9000, mark: () => spotEl('.toast', 6), at: () => tFrom + 45,
       setup: async () => { clearPicked(); resume(); toastPin = true; clearTimeout(toastTimer); await makeToast(); },
       html: '終電が行った駅は、上に<b>「いま行きました」</b>と出ます。地図では、その駅から輪が広がって消えます。' },
     { ms: 10000, at: () => tFrom + 70, setup: () => { resume(); focus(SPOTS.find(x => x.name === '横浜').node); },
-      html: 'ひとつ選ぶと、その帰り方だけが残ります。<b>白い線路が電車</b>、<b>白い破線がタクシー</b>です。時刻はそのまま進みます。' },
+      html: 'ひとつ選ぶと、その帰り方だけが残ります。<b>白い線路が電車</b>、<b>白い破線がタクシー</b>です。' },
     { ms: 10000, mark: () => spotEl('.item.sel', 4), at: () => tFrom + 92,
       setup: () => { resume(); focus(SPOTS.find(x => x.name === '横浜').node); },
       html: '右の一覧に、<b>何時にどの路線に乗るか</b>が出ます。どこで乗り換えるかも分かります。' },
     { ms: 8000, setup: pause,
-      html: '自宅を変えると、終電も帰り方も運賃も変わります。<b>痛みは距離ではなく、終電の残り方で決まります。</b>' },
+      html: '自宅を変えると、終電も帰り方も運賃も変わります。' },
     { ms: 5000, setup: pause,
       html: 'デモはここまでです。<b>◀ ▶</b> で行き来できます。自由に動かしてみてください。' },
   ];
