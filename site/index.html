@@ -507,6 +507,10 @@
   // 残り時間は**色**（落ち着いた緑 → 黄）で見せ、**数字は行ってしまう直前だけ**出す。
   // 数字を地図に戻したいときは MAP_LEFT を true に。
   const MAP_LEFT = false;
+  // ---- 地図に駅名も出さない（2026-10-07 の試し）----
+  // 触れている駅・選んだ駅の札だけ出す。地図は点だけになり、名前は右の一覧で読む。
+  // **元に戻すときは MAP_NAMES を true に。**
+  const MAP_NAMES = false;
   const SOON_MIN = 10;          // これ以下になったら数字も出す
   const CALM_MIN = 60;          // これ以上はずっと落ち着いた色
   const RGB_TRAIN = [95, 211, 178], RGB_SOON = [255, 209, 102];
@@ -888,6 +892,7 @@
         const p = lay && lay.at[s.node];
         if (!p) continue;
         const A = act(), on = A === s.node, dim = A >= 0 && !on;
+        if (!MAP_NAMES && !on) continue;      // 札を出さないなら、つなぐ線も要らない
         const x = SX(s.node), y = SY(s.node);
         const ex = p.ax - 4 * p.side, ey = p.ay;
         const d = Math.hypot(ex - x, ey - y);
@@ -964,6 +969,7 @@
         const p = lay && lay.at[s.node];
         if (!p) continue;
         const A = act(), on = A === s.node;
+        if (!MAP_NAMES && !on) continue;      // 触れている駅だけ名前を出す
         // 触れている札だけは、何分前でも数字を出す（見たくなったときに見られる）
         const txt = s.state === 'train'
             ? (MAP_LEFT || on || s.left <= SOON_MIN ? 'あと ' + s.left + '分' : '')
