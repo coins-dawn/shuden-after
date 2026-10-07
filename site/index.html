@@ -496,8 +496,24 @@
   }
   const heatCss = f => 'rgb(' + heatRGB(f).join(',') + ')';
 
+  // ---- 地図に「あと N 分」の数字も出さない（2026-10-07 から）----
+  // 20 駅ぶんの数字は札を倍の幅にして、帰り道の線を覆ってしまう。
+  // 残り時間は**色**（落ち着いた緑 → 黄）で見せ、**数字は行ってしまう直前だけ**出す。
+  // 数字を地図に戻したいときは MAP_LEFT を true に。
+  const MAP_LEFT = false;
+  const SOON_MIN = 10;          // これ以下になったら数字も出す
+  const CALM_MIN = 60;          // これ以上はずっと落ち着いた色
+  const RGB_TRAIN = [95, 211, 178], RGB_SOON = [255, 209, 102];
+  // 終わりぎわで急に黄色くなる（u を二乗する）。
+  // 線形だと 30 分前からじわじわ変わって、どれが切迫しているのか分からない
+  const leftU = l => clamp01((CALM_MIN - l) / (CALM_MIN - SOON_MIN));
+  const trainColor = l => {
+    const u = leftU(l) * leftU(l);
+    return 'rgb(' + RGB_TRAIN.map((v, i) => mixCh(v, RGB_SOON[i], u)).join(',') + ')';
+  };
+
   const stateColor = s => s.state === 'home' ? COL.home
-    : s.state === 'train' ? (s.left <= 15 ? COL.soon : COL.train)
+    : s.state === 'train' ? trainColor(s.left)
     : (MAP_FARE ? COL.taxi : heatCss(s.fare));
 
   const fmt = v => String(Math.floor(v / 60) % 24).padStart(2, '0') + ':' + String(v % 60).padStart(2, '0');
@@ -927,7 +943,9 @@
         const p = lay && lay.at[s.node];
         if (!p) continue;
         const A = act(), on = A === s.node;
-        const txt = s.state === 'train' ? 'あと ' + s.left + '分'
+        // 触れている札だけは、何分前でも数字を出す（見たくなったときに見られる）
+        const txt = s.state === 'train'
+            ? (MAP_LEFT || on || s.left <= SOON_MIN ? 'あと ' + s.left + '分' : '')
           : s.state === 'taxi' ? (MAP_FARE ? yen(s.fare) : '') : '—';
         chip(p.x, p.y, s.name, txt, stateColor(s), p.nameW, on, A >= 0 && !on);
         HITS.push([p.x - 7, p.y - 12, p.x + p.w + 7, p.y + 12, s.node]);
@@ -1123,9 +1141,11 @@
       W, H, walls.join(';')].join('|');
     if (key === layKey && layVal) return layVal;
 
-    // 値は時刻で変わるので、取りうるいちばん広い文字で場所を取っておく
-    // （「あと 155分」は「¥00,000」より広い）
-    const VW = Math.max(measure('¥00,000', 13.5), measure('あと 999分', 13.5));
+    // 値は時刻で変わるので、取りうるいちばん広い文字で場所を取っておく。
+    // **時刻を鍵に入れていないので、ここは時刻によらない定数でなければならない**
+    // （出すのは「あと 10分」までなので、二桁ぶんあれば足りる）
+    const VW = Math.max(MAP_FARE ? measure('¥00,000', 13.5) : 0,
+                        measure(MAP_LEFT ? 'あと 999分' : 'あと 99分', 13.5));
     // 1 つ選んでいるときは、その札だけ置く（ほかは点だけ残して邪魔をしない）
     const sp = SPOTS.filter(s => s.node !== home && (picked < 0 || s.node === picked)).map(s => {
       const nw = measure(s.name, 13);
